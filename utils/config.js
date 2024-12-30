@@ -266,6 +266,15 @@ config.version = defaultConfig.version
 // config.version = latestTag
 
 export const Config = new Proxy(config, {
+  get(target, property) {
+    if (property === 'geminiKey') {
+      if (typeof target[property] === 'string' && target[property].includes(',')) {
+        const keys = target[property].split(',').map(key => key.trim()).filter(Boolean)
+        return keys[Math.floor(Math.random() * keys.length)]
+      }
+    }
+    return target[property]
+  },
   set (target, property, value) {
     target[property] = value
     const change = lodash.transform(target, function (result, value, key) {
