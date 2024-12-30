@@ -271,7 +271,7 @@ export const Config = new Proxy(config, {
       if (typeof target[property] === 'string' && target[property].includes(',')) {
         const keys = target[property].split(',').map(key => key.trim()).filter(Boolean)
         const selectedKey = keys[Math.floor(Math.random() * keys.length)]
-        console.log(`[ChatGPT-Plugin] 当前使用的Gemini Key: ${selectedKey`) 
+        console.log(`[ChatGPT-Plugin] 当前使用的Gemini Key: ${selectedKey}`) 
         return selectedKey
       }
     }
