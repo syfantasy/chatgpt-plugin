@@ -268,9 +268,13 @@ config.version = defaultConfig.version
 export const Config = new Proxy(config, {
   get(target, property) {
     if (property === 'geminiKey') {
+      // 如果配置中的geminiKey包含逗号，说明是多个key
       if (typeof target[property] === 'string' && target[property].includes(',')) {
         const keys = target[property].split(',').map(key => key.trim()).filter(Boolean)
-        return keys[Math.floor(Math.random() * keys.length)]
+        // 随机返回其中一个key
+        const selectedKey = keys[Math.floor(Math.random() * keys.length)]
+        console.log(`[ChatGPT-Plugin] 当前使用的Gemini Key: ${selectedKey.slice(0, 8)}...`) // 只显示key的前8位，后面用...代替
+        return selectedKey
       }
     }
     return target[property]
