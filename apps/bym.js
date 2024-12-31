@@ -16,6 +16,7 @@ import { EditCardTool } from '../utils/tools/EditCardTool.js'
 import { JinyanTool } from '../utils/tools/JinyanTool.js'
 import { KickOutTool } from '../utils/tools/KickOutTool.js'
 import { SetTitleTool } from '../utils/tools/SetTitleTool.js'
+import {SerpTool} from '../utils/tools/SerpTool.js'
 
 export class bym extends plugin {
   constructor () {
@@ -89,7 +90,7 @@ export class bym extends plugin {
         '以下是聊天记录:' + chats
           .map(chat => {
             let sender = chat.sender || chat || {}
-            return `${sender.card || sender.nickname} ：${chat.raw_message}`
+            return `${sender.card || sender.nickname}(${sender.user_id}) ：${chat.raw_message}`
           })
           .join('\n') +
         `\n你的回复应该尽可能简练，像人类一样随意，不要附加任何奇怪的东西，如聊天记录的格式（比如${Config.assistantLabel}：），禁止重复聊天记录。`
@@ -117,6 +118,9 @@ export class bym extends plugin {
         new WebsiteTool(),
         new WeatherTool()
       ]
+      if (Config.azSerpKey) {
+        tools.push(new SerpTool())
+      }
       if (e.group.is_admin || e.group.is_owner) {
         tools.push(new EditCardTool())
         tools.push(new JinyanTool())
