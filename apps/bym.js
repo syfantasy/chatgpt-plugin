@@ -148,7 +148,7 @@ export class bym extends plugin {
         let finalMsg = await convertFaces(t, true, e)
         logger.info(JSON.stringify(finalMsg))
         finalMsg = finalMsg.map(filterResponseChunk).filter(i => !!i)
-        if (finalMsg) {
+        if (finalMsg && finalMsg.length > 0) {
           if (Math.floor(Math.random() * 100) < 10) {
             await this.reply(finalMsg, true, {
               recallMsg: fuck ? 10 : 0
