@@ -16,7 +16,7 @@ import { EditCardTool } from '../utils/tools/EditCardTool.js'
 import { JinyanTool } from '../utils/tools/JinyanTool.js'
 import { KickOutTool } from '../utils/tools/KickOutTool.js'
 import { SetTitleTool } from '../utils/tools/SetTitleTool.js'
-import {SerpTool} from '../utils/tools/SerpTool.js'
+import { SerpTool } from '../utils/tools/SerpTool.js'
 import { SendMessageToSpecificGroupOrUserTool } from '../utils/tools/SendMessageToSpecificGroupOrUserTool.js'
 
 export class bym extends plugin {
@@ -176,6 +176,9 @@ export class bym extends plugin {
  */
 function filterResponseChunk (msg) {
   if (!msg || typeof msg !== 'string') {
+    return false
+  }
+  if (!msg.trim()) {
     return false
   }
   if (msg.trim() === '```') {
