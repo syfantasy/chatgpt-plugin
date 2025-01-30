@@ -316,9 +316,8 @@ export class ChatGPTAPI {
                                 result.functionCall = message.function_call
                             } else if (message.tool_calls) {
                                 result.functionCall = message.tool_calls.map(tool => tool.function)[0]
-                            } else if (message.reasoning_content) {
-                                result.thinking_text = message.reasoning_content
                             }
+                            result.thinking_text = message.reasoning_content
                             if (message.role) {
                                 result.role = message.role
                             }
