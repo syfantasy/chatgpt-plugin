@@ -156,7 +156,6 @@ const defaultConfig = {
   serpSource: 'ikechan8370',
   extraUrl: 'https://cpe.ikechan8370.com',
   smartMode: false,
-  bingCaptchaOneShotUrl: '',
   // claude2
   claudeAIOrganizationId: '',
   claudeAISessionKey: '',
@@ -215,9 +214,19 @@ const defaultConfig = {
   // 伪人额外设定
   bymPreset: '',
   bymMode: 'gemini',
+  // 思考过程转发
+  forwardReasoning: true,
   geminiEnableGoogleSearch: false,
   geminiEnableCodeExecution: false,
-  version: 'v2.8.2'
+  bingAiToken: '', // copilot.microsoft.com accessToken
+  bingAiClientId: '',
+  bingAiScope: '140e65af-45d1-4427-bf08-3e7295db6836/ChatAI.ReadWrite openid profile offline_access',
+  bingAiRefreshToken: '',
+  bingAiOid: '',
+  _2captchaKey: '',
+  bingReasoning: false, // 是否深度思考
+
+  version: 'v2.8.3'
 }
 const _path = process.cwd()
 let config = {}
