@@ -28,7 +28,7 @@ export class SearchMusicTool extends AbstractTool {
 }
 
 export async function searchMusic163 (name) {
-  let response = await fetch(`http://music.163.com/api/search/get/web?s=${name}&type=1&offset=0&total=true&limit=6`)
+  let response = await fetch(`https://music.hanhanz.top/search?keywords=${name}&type=1&offset=0&total=true&limit=6`)
   let json = await response.json()
   if (json.result?.songCount > 0) {
     return json.result.songs.map(song => {
