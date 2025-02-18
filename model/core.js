@@ -54,6 +54,7 @@ import { QwenApi } from '../utils/alibaba/qwen-api.js'
 import { BingAIClient } from '../client/CopilotAIClient.js'
 import Keyv from 'keyv'
 import crypto from 'crypto'
+import {GithubAPITool} from '../utils/tools/GithubTool.js'
 
 export const roleMap = {
   owner: 'group owner',
@@ -774,7 +775,8 @@ async function collectTools (e) {
     new SendMessageToSpecificGroupOrUserTool(),
     new SendDiceTool(),
     new QueryGenshinTool(),
-    new SetTitleTool()
+    new SetTitleTool(),
+    new GithubAPITool()
   ]
   // todo 3.0再重构tool的插拔和管理
   let /** @type{AbstractTool[]} **/ tools = [
@@ -796,7 +798,8 @@ async function collectTools (e) {
     new APTool(),
     // new HandleMessageMsgTool(),
     serpTool,
-    new QueryUserinfoTool()
+    new QueryUserinfoTool(),
+    new GithubAPITool()
   ]
   let systemAddition = ''
   if (e.isGroup) {
