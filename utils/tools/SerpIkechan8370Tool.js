@@ -19,47 +19,48 @@ export class SerpIkechan8370Tool extends AbstractTool {
         description: 'search results limit number, default is 5'
       }
     },
-    required: ['q', 'source']
+    required: ['q']
   }
 
-func = async function (opts) {
-    let { q, source, num = 5 } = opts
-    if (!source || !['google', 'bing', 'baidu', 'duckduckgo'].includes(source)) {
-      source = 'bing'
-    }
+  func = async function (opts) {
+    try {
+      let { q, source = 'bing', num = 5 } = opts
+      
+      if (!['google', 'bing', 'baidu', 'duckduckgo'].includes(source)) {
+        source = 'bing'
+      }
 
-    return new Promise((resolve, reject) => {
-      const https = require('https')
       const url = `https://serp.ikechan8370.com/${source}?q=${encodeURIComponent(q)}&lang=zh-CN&limit=${num}`
       
-      https.get(url, {
+      const response = await fetch(url, {
         headers: {
           'X-From-Library': 'ikechan8370'
         }
-      }, (resp) => {
-        let data = ''
-        
-        resp.on('data', (chunk) => {
-          data += chunk
-        })
-        
-        resp.on('end', () => {
-          try {
-            const serpRes = JSON.parse(data)
-            let res = serpRes.data || serpRes.results
-            res?.forEach(r => {
-              delete r?.rank
-            })
-            resolve(`the search results are here in json format:\n${JSON.stringify(res)} \n(Notice that these information are only available for you, the user cannot see them, you next answer should consider about the information)`)
-          } catch (error) {
-            reject(error)
-          }
-        })
-      }).on('error', (err) => {
-        reject(err)
       })
-    })
-}
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const serpRes = await response.json()
+      let res = serpRes.data || serpRes.results
+      
+      if (!res) {
+        throw new Error('No results found in response')
+      }
+      
+      // 移除每个结果中的 rank 字段
+      res = res.map(item => {
+        const { rank, ...rest } = item
+        return rest
+      })
+      
+      return `the search results are here in json format:\n${JSON.stringify(res, null, 2)} \n(Notice that these information are only available for you, the user cannot see them, you next answer should consider about the information)`
+    } catch (error) {
+      console.error('Search error:', error)
+      return `Error during search: ${error.message}`
+    }
+  }
 
   description = 'Useful when you want to search something from the Internet. If you don\'t know much about the user\'s question, prefer to search about it! If you want to know further details of a result, you can use website tool'
 }
