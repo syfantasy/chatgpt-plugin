@@ -24,17 +24,24 @@ export class SerpIkechan8370Tool extends AbstractTool {
 
   func = async function (opts) {
     try {
-      let { q, source = 'bing', num = 5 } = opts
+      // 过滤掉非搜索相关的参数
+      const { q, source = 'bing', num = 5 } = {
+        q: opts.q,
+        source: opts.source,
+        num: opts.num
+      }
       
       if (!['google', 'bing', 'baidu', 'duckduckgo'].includes(source)) {
         source = 'bing'
       }
 
       const url = `https://serp.ikechan8370.com/${source}?q=${encodeURIComponent(q)}&lang=zh-CN&limit=${num}`
+      console.log('Request URL:', url)
       
       const response = await fetch(url, {
         headers: {
-          'X-From-Library': 'ikechan8370'
+          'X-From-Library': 'ikechan8370',
+          'Accept': 'application/json'
         }
       })
       
@@ -42,20 +49,38 @@ export class SerpIkechan8370Tool extends AbstractTool {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
       
-      const serpRes = await response.json()
+      const responseText = await response.text()
+      console.log('Raw response:', responseText)
       
-      // 检查响应状态码
-      if (serpRes.code !== 200) {
-        throw new Error(`API error: ${serpRes.message}`)
+      let serpRes
+      try {
+        serpRes = JSON.parse(responseText)
+      } catch (e) {
+        throw new Error(`Failed to parse JSON response: ${e.message}`)
       }
+      
+      console.log('Parsed response:', serpRes)
 
-      // 确保 data 字段存在且为数组
-      if (!serpRes.data || !Array.isArray(serpRes.data)) {
-        throw new Error('Invalid response format: data field missing or not an array')
+      // 尝试从不同位置获取结果数组
+      let results = serpRes.data || serpRes.results || serpRes
+      
+      // 如果结果不是数组，尝试将其转换为数组
+      if (!Array.isArray(results)) {
+        if (typeof results === 'object') {
+          results = [results]
+        } else {
+          results = []
+        }
       }
-
-      // 处理数据，移除 rank 字段
-      const results = serpRes.data.map(({ rank, ...item }) => item)
+      
+      // 移除 rank 字段并清理数据
+      results = results.map(item => {
+        if (typeof item !== 'object' || item === null) {
+          return { content: String(item) }
+        }
+        const { rank, ...rest } = item
+        return rest
+      })
       
       if (results.length === 0) {
         return 'No search results found.'
@@ -64,7 +89,8 @@ export class SerpIkechan8370Tool extends AbstractTool {
       return `the search results are here in json format:\n${JSON.stringify(results, null, 2)} \n(Notice that these information are only available for you, the user cannot see them, you next answer should consider about the information)`
     } catch (error) {
       console.error('Search error:', error)
-      return `An error occurred during search. Please try again later. (Error: ${error.message})`
+      // 返回更详细的错误信息
+      return `An error occurred during search. Please try again later. (Error: ${error.message})\nStack: ${error.stack}`
     }
   }
 
