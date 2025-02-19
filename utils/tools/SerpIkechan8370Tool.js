@@ -1,4 +1,5 @@
 import { AbstractTool } from './AbstractTool.js'
+import fetch from 'node-fetch'
 
 export class SerpIkechan8370Tool extends AbstractTool {
   name = 'search'
@@ -19,78 +20,46 @@ export class SerpIkechan8370Tool extends AbstractTool {
         description: 'search results limit number, default is 5'
       }
     },
-    required: ['q']
+    required: ['q', 'source']
   }
 
   func = async function (opts) {
-    try {
-      // 过滤掉非搜索相关的参数
-      const { q, source = 'bing', num = 5 } = {
-        q: opts.q,
-        source: opts.source,
-        num: opts.num
-      }
-      
-      if (!['google', 'bing', 'baidu', 'duckduckgo'].includes(source)) {
-        source = 'bing'
-      }
+    let { q, source, num = 5 } = opts
+    if (!source || !['google', 'bing', 'baidu', 'duckduckgo'].includes(source)) {
+      source = 'bing'
+    }
 
+    try {
       const url = `https://serp.ikechan8370.com/${source}?q=${encodeURIComponent(q)}&lang=zh-CN&limit=${num}`
-      console.log('Request URL:', url)
-      
+      console.log('Requesting URL:', url) // 调试用
+
       const response = await fetch(url, {
         headers: {
-          'X-From-Library': 'ikechan8370',
-          'Accept': 'application/json'
+          'X-From-Library': 'ikechan8370'
         }
       })
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
-      
-      const responseText = await response.text()
-      console.log('Raw response:', responseText)
-      
-      let serpRes
-      try {
-        serpRes = JSON.parse(responseText)
-      } catch (e) {
-        throw new Error(`Failed to parse JSON response: ${e.message}`)
-      }
-      
-      console.log('Parsed response:', serpRes)
 
-      // 尝试从不同位置获取结果数组
-      let results = serpRes.data || serpRes.results || serpRes
-      
-      // 如果结果不是数组，尝试将其转换为数组
-      if (!Array.isArray(results)) {
-        if (typeof results === 'object') {
-          results = [results]
-        } else {
-          results = []
-        }
+      const serpRes = await response.json()
+      console.log('API Response:', serpRes) // 调试用
+
+      let res = serpRes.data || serpRes.results
+      if (!res) {
+        console.error('No data found in response:', serpRes)
+        return 'Sorry, no search results found.'
       }
-      
-      // 移除 rank 字段并清理数据
-      results = results.map(item => {
-        if (typeof item !== 'object' || item === null) {
-          return { content: String(item) }
-        }
-        const { rank, ...rest } = item
-        return rest
+
+      res?.forEach(r => {
+        delete r?.rank
       })
-      
-      if (results.length === 0) {
-        return 'No search results found.'
-      }
-      
-      return `the search results are here in json format:\n${JSON.stringify(results, null, 2)} \n(Notice that these information are only available for you, the user cannot see them, you next answer should consider about the information)`
+
+      return `the search results are here in json format:\n${JSON.stringify(res)} \n(Notice that these information are only available for you, the user cannot see them, you next answer should consider about the information)`
     } catch (error) {
       console.error('Search error:', error)
-      // 返回更详细的错误信息
-      return `An error occurred during search. Please try again later. (Error: ${error.message})\nStack: ${error.stack}`
+      return `An error occurred during search: ${error.message}`
     }
   }
 
