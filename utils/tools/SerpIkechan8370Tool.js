@@ -43,22 +43,28 @@ export class SerpIkechan8370Tool extends AbstractTool {
       }
       
       const serpRes = await response.json()
-      let res = serpRes.data || serpRes.results
       
-      if (!res) {
-        throw new Error('No results found in response')
+      // 检查响应状态码
+      if (serpRes.code !== 200) {
+        throw new Error(`API error: ${serpRes.message}`)
+      }
+
+      // 确保 data 字段存在且为数组
+      if (!serpRes.data || !Array.isArray(serpRes.data)) {
+        throw new Error('Invalid response format: data field missing or not an array')
+      }
+
+      // 处理数据，移除 rank 字段
+      const results = serpRes.data.map(({ rank, ...item }) => item)
+      
+      if (results.length === 0) {
+        return 'No search results found.'
       }
       
-      // 移除每个结果中的 rank 字段
-      res = res.map(item => {
-        const { rank, ...rest } = item
-        return rest
-      })
-      
-      return `the search results are here in json format:\n${JSON.stringify(res, null, 2)} \n(Notice that these information are only available for you, the user cannot see them, you next answer should consider about the information)`
+      return `the search results are here in json format:\n${JSON.stringify(results, null, 2)} \n(Notice that these information are only available for you, the user cannot see them, you next answer should consider about the information)`
     } catch (error) {
       console.error('Search error:', error)
-      return `Error during search: ${error.message}`
+      return `An error occurred during search. Please try again later. (Error: ${error.message})`
     }
   }
 
