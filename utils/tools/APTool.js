@@ -24,13 +24,13 @@ export class APTool extends AbstractTool {
     let ap
     try {
       // eslint-disable-next-line camelcase
-      let { Ai_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
+      let { MJ_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
       ap = new Ai_Painting(e)
     } catch (err) {
       try {
         // ap的dev分支改名了
         // eslint-disable-next-line camelcase
-        let { Ai_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
+        let { MJ_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
         ap = new Ai_Painting(e)
       } catch (err1) {
         return 'the user didn\'t install sf-plugin. suggest him to install'
