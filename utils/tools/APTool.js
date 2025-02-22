@@ -7,7 +7,7 @@ export class APTool extends AbstractTool {
     properties: {
       prompt: {
         type: 'string',
-        description: 'draw prompt of StableDiffusion, prefer to be in English. should be many keywords split by comma.'
+        description: 'draw prompt of midjourney, prefer to be in English. should be many keysentences split by comma.'
       }
     },
     required: []
@@ -24,20 +24,20 @@ export class APTool extends AbstractTool {
     let ap
     try {
       // eslint-disable-next-line camelcase
-      let { Ai_Painting } = await import('../../../ap-plugin/apps/aiPainting.js')
+      let { Ai_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
       ap = new Ai_Painting(e)
     } catch (err) {
       try {
         // ap的dev分支改名了
         // eslint-disable-next-line camelcase
-        let { Ai_Painting } = await import('../../../ap-plugin/apps/ai_painting.js')
+        let { Ai_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
         ap = new Ai_Painting(e)
       } catch (err1) {
-        return 'the user didn\'t install ap-plugin. suggest him to install'
+        return 'the user didn\'t install sf-plugin. suggest him to install'
       }
     }
     try {
-      e.msg = '#绘图' + prompt
+      e.msg = '#mjp' + prompt
       await ap.aiPainting(e)
       return 'draw success, picture has been sent.'
     } catch (err) {
