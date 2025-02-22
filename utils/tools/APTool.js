@@ -25,20 +25,20 @@ export class APTool extends AbstractTool {
     try {
       // eslint-disable-next-line camelcase
       let { MJ_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
-      ap = new Ai_Painting(e)
+      ap = new MJ_Painting(e)
     } catch (err) {
       try {
         // ap的dev分支改名了
         // eslint-disable-next-line camelcase
         let { MJ_Painting } = await import('../../../siliconflow-plugin/apps/MJ_Painting.js')
-        ap = new Ai_Painting(e)
+        ap = new MJ_Painting(e)
       } catch (err1) {
         return 'the user didn\'t install sf-plugin. suggest him to install'
       }
     }
     try {
       e.msg = '#mjp' + prompt
-      await ap.aiPainting(e)
+      await ap.mj_draw(e)
       return 'draw success, picture has been sent.'
     } catch (err) {
       return 'draw failed due to unknown error'
