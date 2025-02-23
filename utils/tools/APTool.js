@@ -7,7 +7,7 @@ export class APTool extends AbstractTool {
     properties: {
       prompt: {
         type: 'string',
-        description: 'draw prompt of flux, prefer to be in English. should be many keywords split by comma.'
+        description: 'draw prompt of flux, you must generate the prompt in English, which should be many keywords split by comma.'
       }
     },
     required: []
