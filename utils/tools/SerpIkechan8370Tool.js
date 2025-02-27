@@ -28,7 +28,7 @@ export class SerpIkechan8370Tool extends AbstractTool {
     if (!source || !['google', 'bing', 'baidu', 'duckduckgo'].includes(source)) {
       source = 'bing'
     }
-    let serpRes = await fetch(`https://serp.ikechan8370.com/${source}?q=${encodeURIComponent(q)}&lang=zh-CN&limit=${num}`, {
+    let serpRes = await fetch(`https://search-28080.u-pmb.hy.wekube.com/${source}?q=${encodeURIComponent(q)}&lang=zh-CN&limit=${num}`, {
       headers: {
         'X-From-Library': 'ikechan8370'
       }
