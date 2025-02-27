@@ -23,7 +23,7 @@ export class SerpImageTool extends AbstractTool {
 
   func = async function (opts) {
     let { q, limit = 2, source = 'bing' } = opts
-    let serpRes = await fetch(`https://serp.ikechan8370.com/image/${source}?q=${encodeURIComponent(q)}&limit=${limit}`, {
+    let serpRes = await fetch(`https://search-28080.u-pmb.hy.wekube.com/image/${source}?q=${encodeURIComponent(q)}&limit=${limit}`, {
       headers: {
         'X-From-Library': 'ikechan8370'
       }
