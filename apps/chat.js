@@ -788,7 +788,7 @@ export class chatgpt extends plugin {
       let thinking = chatMessage.thinking_text
       for (let processor of postProcessors) {
         let output = await processor.processInner({
-          text: response, thinking
+          text: response, thinking_text: thinking
         })
         response = output.text
         thinking = output.thinking_text
