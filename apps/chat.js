@@ -74,6 +74,10 @@ export class Chat extends plugin {
     if (baseSystem) {
       sendMessageOptions.systemOverride = baseSystem
     }
+    // 思维模型开启思考转发时禁用 streaming（与 bym 模式相同原因）
+    if (Config.bym.sendReasoning && (preset.sendMessageOption?.isThinkingModel || preset.sendMessageOption?.enableReasoning)) {
+      sendMessageOptions.stream = false
+    }
     // 构建动态上下文（记忆、群聊上下文），拼接到用户消息前面
     // 将其从 system prompt 中分离，保持 system prompt 静态以利用 LLM prompt cache
     const contextSegments = []
@@ -157,8 +161,11 @@ export class Chat extends plugin {
     if (msgs.length > 0) {
       await e.reply(msgs, true)
     }
-    for (let forwardElement of forward) {
-      this.reply(forwardElement)
+    // 与 bym 模式共用 sendReasoning 开关
+    if (Config.bym.sendReasoning) {
+      for (let forwardElement of forward) {
+        this.reply(forwardElement)
+      }
     }
     await processUserMemory({
       event: e,
