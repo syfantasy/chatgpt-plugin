@@ -2,7 +2,7 @@ import Config from '../config/config.js'
 import { Chaite, SendMessageOption } from 'chaite'
 import { getPreset, intoUserMessage, toYunzai } from '../utils/message.js'
 import { YunzaiUserState } from '../models/chaite/storage/lowdb/user_state_storage.js'
-import { getGroupContextPrompt } from '../utils/group.js'
+import { getGroupContextPrompt, buildGroupContextMessages, getGroupHistory } from '../utils/group.js'
 import { buildMemoryPrompt } from '../models/memory/prompt.js'
 import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
 import * as crypto from 'node:crypto'
@@ -69,11 +69,14 @@ export class Chat extends plugin {
     const userText = extractTextFromUserMessage(userMessage) || e.msg || ''
     sendMessageOptions.conversationId = state?.current?.conversationId
     sendMessageOptions.parentMessageId = state?.current?.messageId || state?.conversations.find(c => c.id === sendMessageOptions.conversationId)?.lastMessageId
-    const systemSegments = []
+    // systemOverride 保持静态（仅 baseSystem），动态内容移到独立 user message 中
     const baseSystem = sendMessageOptions.systemOverride || preset.sendMessageOption?.systemOverride || ''
     if (baseSystem) {
-      systemSegments.push(baseSystem)
+      sendMessageOptions.systemOverride = baseSystem
     }
+    // 构建动态上下文（记忆、群聊上下文），拼接到用户消息前面
+    // 将其从 system prompt 中分离，保持 system prompt 静态以利用 LLM prompt cache
+    const contextSegments = []
     if (userText) {
       const memoryPrompt = await buildMemoryPrompt({
         userId: e.sender.user_id + '',
@@ -81,19 +84,56 @@ export class Chat extends plugin {
         queryText: userText
       })
       if (memoryPrompt) {
-        systemSegments.push(memoryPrompt)
+        contextSegments.push(memoryPrompt)
         logger.debug(`[Memory] memory prompt: ${memoryPrompt}`)
       }
     }
+    // 群聊上下文：拆成独立消息，利用快照实现滑动窗口下的 prefix cache 复用
+    let groupContextMsgs = []
     const enableGroupContext = (preset.groupContext === 'use_system' || !preset.groupContext) ? Config.llm.enableGroupContext : (preset.groupContext === 'enabled')
     if (enableGroupContext && e.isGroup) {
-      const contextPrompt = await getGroupContextPrompt(e, Config.llm.groupContextLength)
-      if (contextPrompt) {
-        systemSegments.push(contextPrompt)
+      const groupContext = await buildGroupContextMessages(
+        e,
+        Config.llm.groupContextLength,
+        {
+          groupContextTemplatePrefix: Config.llm.groupContextTemplatePrefix,
+          groupContextTemplateMessage: Config.llm.groupContextTemplateMessage,
+          groupContextTemplateSuffix: Config.llm.groupContextTemplateSuffix
+        },
+        getGroupHistory
+      )
+      if (groupContext?.messages.length) {
+        // header 并入记忆所在的消息
+        if (groupContext.header) {
+          contextSegments.push(groupContext.header)
+        }
+        for (const m of groupContext.messages) {
+          groupContextMsgs.push(m.text)
+        }
       }
     }
-    if (systemSegments.length > 0) {
-      sendMessageOptions.systemOverride = systemSegments.join('\n\n')
+
+    // 记忆 + 群聊 header → 拼到用户消息前面（chat 模式不单独持久化，避免历史链断裂）
+    if (contextSegments.length > 0) {
+      const contextText = contextSegments.join('\n\n')
+      const textContent = userMessage.content.find(c => c.type === 'text')
+      if (textContent) {
+        textContent.text = contextText + '\n\n' + textContent.text
+      } else {
+        userMessage.content.unshift({ type: 'text', text: contextText })
+      }
+    }
+
+    // 群聊消息逐条保存为独立 user message
+    for (const text of groupContextMsgs) {
+      const msg = {
+        id: crypto.randomUUID(),
+        parentId: sendMessageOptions.parentMessageId,
+        role: 'user',
+        content: [{ type: 'text', text }]
+      }
+      await Chaite.getInstance().getHistoryManager().saveHistory(msg, sendMessageOptions.conversationId)
+      sendMessageOptions.parentMessageId = msg.id
     }
     const response = await Chaite.getInstance().sendMessage(userMessage, e, {
       ...sendMessageOptions,

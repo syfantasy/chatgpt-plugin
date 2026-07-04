@@ -2,10 +2,11 @@ import ChatGPTConfig from '../config/config.js'
 import { Chaite } from 'chaite'
 import { intoUserMessage, toYunzai } from '../utils/message.js'
 import common from '../../../lib/common/common.js'
-import { getGroupContextPrompt } from '../utils/group.js'
+import { getGroupContextPrompt, buildGroupContextMessages, getGroupHistory } from '../utils/group.js'
 import { formatTimeToBeiJing } from '../utils/common.js'
 import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
 import { buildMemoryPrompt } from '../models/memory/prompt.js'
+import * as crypto from 'node:crypto'
 
 export class bym extends plugin {
   constructor () {
@@ -69,7 +70,13 @@ export class bym extends plugin {
       }
       sendMessageOption.systemOverride = ChatGPTConfig.bym.presetPrefix + sendMessageOption.systemOverride
     }
-    sendMessageOption.systemOverride = `Current Time: ${formatTimeToBeiJing(new Date().getTime())}\n` + sendMessageOption.systemOverride
+    // 思维模型开启思考转发时禁用 streaming
+    // chaite 绑定的 OpenAI SDK 版本过旧，streaming 路径无法聚合 reasoning_content，
+    // 导致思考内容丢失（只残留一两个 token）。改用 non-streaming 路径获取完整 reasoning。
+    if (ChatGPTConfig.bym.sendReasoning && sendMessageOption.isThinkingModel) {
+      sendMessageOption.stream = false
+    }
+    // 不再将时间戳写入 systemOverride，保持 system prompt 静态以利用 LLM prompt cache
     if (ChatGPTConfig.bym.temperature >= 0) {
       sendMessageOption.temperature = ChatGPTConfig.bym.temperature
     }
@@ -101,10 +108,10 @@ export class bym extends plugin {
         this.reply(forwardElement)
       }
     }
-    const systemSegments = []
-    if (sendMessageOption.systemOverride) {
-      systemSegments.push(sendMessageOption.systemOverride)
-    }
+    // 构建动态上下文，作为独立 user message 插入历史
+    // 从 system prompt 中分离，保持 system prompt 静态以利用 LLM prefix cache
+    const contextSegments = []
+    contextSegments.push(`Current Time: ${formatTimeToBeiJing(new Date().getTime())}`)
     if (userText) {
       const memoryPrompt = await buildMemoryPrompt({
         userId: e.sender.user_id + '',
@@ -112,18 +119,58 @@ export class bym extends plugin {
         queryText: userText
       })
       if (memoryPrompt) {
-        systemSegments.push(memoryPrompt)
+        contextSegments.push(memoryPrompt)
         logger.debug(`[Memory] bym memory prompt: ${memoryPrompt}`)
       }
     }
+
+    // 群聊上下文：拆成独立消息，利用快照实现滑动窗口下的 prefix cache 复用
+    let groupContextMsgs = []
     if (ChatGPTConfig.llm.enableGroupContext && e.isGroup) {
-      const contextPrompt = await getGroupContextPrompt(e, ChatGPTConfig.llm.groupContextLength)
-      if (contextPrompt) {
-        systemSegments.push(contextPrompt)
+      const groupContext = await buildGroupContextMessages(
+        e,
+        ChatGPTConfig.llm.groupContextLength,
+        {
+          groupContextTemplatePrefix: ChatGPTConfig.llm.groupContextTemplatePrefix,
+          groupContextTemplateMessage: ChatGPTConfig.llm.groupContextTemplateMessage,
+          groupContextTemplateSuffix: ChatGPTConfig.llm.groupContextTemplateSuffix
+        },
+        getGroupHistory
+      )
+      if (groupContext?.messages.length) {
+        // header 并入时间戳/记忆所在的消息
+        if (groupContext.header) {
+          contextSegments.push(groupContext.header)
+        }
+        for (const m of groupContext.messages) {
+          groupContextMsgs.push(m.text)
+        }
       }
     }
-    if (systemSegments.length > 0) {
-      sendMessageOption.systemOverride = systemSegments.join('\n\n')
+
+    // 保存时间戳 + 记忆 + 群聊 header 为一条消息
+    if (contextSegments.length > 0) {
+      const contextText = contextSegments.join('\n\n')
+      const contextMsg = {
+        id: crypto.randomUUID(),
+        parentId: sendMessageOption.parentMessageId,
+        role: 'user',
+        content: [{ type: 'text', text: contextText }]
+      }
+      await Chaite.getInstance().getHistoryManager().saveHistory(contextMsg, sendMessageOption.conversationId)
+      sendMessageOption.parentMessageId = contextMsg.id
+    }
+
+    // 群聊消息逐条保存为独立 user message，prefix cache 才能按行对齐复用
+    for (const text of groupContextMsgs) {
+      const msg = {
+        id: crypto.randomUUID(),
+        parentId: sendMessageOption.parentMessageId,
+        role: 'user',
+        content: [{ type: 'text', text: text }]
+      }
+      await Chaite.getInstance().getHistoryManager().saveHistory(msg, sendMessageOption.conversationId)
+      sendMessageOption.parentMessageId = msg.id
     }
     // 发送
     const response = await Chaite.getInstance().sendMessage(userMessage, e, {

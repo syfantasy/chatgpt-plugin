@@ -1,6 +1,7 @@
 import { getBotFramework } from './bot.js'
 import ChatGPTConfig from '../config/config.js'
 import { formatTimeToBeiJing } from './common.js'
+export { buildGroupContextMessages } from './groupContextCache.js'
 
 export class GroupContextCollector {
   /**
