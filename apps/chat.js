@@ -167,13 +167,14 @@ export class Chat extends plugin {
         this.reply(forwardElement)
       }
     }
-    await processUserMemory({
+    // 异步提取记忆，不阻塞消息回复
+    processUserMemory({
       event: e,
       userMessage,
       userText,
       conversationId: sendMessageOptions.conversationId,
       assistantContents: response.contents,
       assistantMessageId: response.id
-    })
+    }).catch(err => logger.warn('[Memory] user memory extraction failed:', err.message))
   }
 }

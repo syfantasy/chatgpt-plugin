@@ -190,13 +190,14 @@ export class bym extends plugin {
         await e.reply(forwardElement, false, { recallMsg: recall ? 10 : 0 })
       }
     }
-    await processUserMemory({
+    // 异步提取记忆，不阻塞消息回复
+    processUserMemory({
       event: e,
       userMessage,
       userText,
       conversationId: sendMessageOption.conversationId,
       assistantContents: response.contents,
       assistantMessageId: response.id
-    })
+    }).catch(err => logger.warn('[Memory] user memory extraction failed:', err.message))
   }
 }
