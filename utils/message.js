@@ -1,6 +1,7 @@
 import { Chaite } from 'chaite'
 import common from '../../../lib/common/common.js'
 import fetch from 'node-fetch'
+import { visionService } from './vision.js'
 
 /**
  * 将e中的消息转换为chaite的UserMessage
@@ -47,10 +48,14 @@ export async function intoUserMessage (e, options = {}) {
           const res = await fetch(val.url)
           if (res.ok) {
             const mimeType = res.headers.get('content-type') || 'image/jpeg'
+            const buffer = Buffer.from(await res.arrayBuffer())
+            const base64 = buffer.toString('base64')
+            const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
             contents.push({
               type: 'image',
-              image: Buffer.from(await res.arrayBuffer()).toString('base64'),
-              mimeType
+              image: base64,
+              mimeType,
+              ref
             })
           } else {
             logger.warn(`fetch image ${val.url} failed: ${res.status}`)
@@ -96,10 +101,14 @@ export async function intoUserMessage (e, options = {}) {
     const res = await fetch(element.url)
     if (res.ok) {
       const mimeType = res.headers.get('content-type') || 'image/jpeg'
+      const buffer = Buffer.from(await res.arrayBuffer())
+      const base64 = buffer.toString('base64')
+      const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
       contents.push({
         type: 'image',
-        image: Buffer.from(await res.arrayBuffer()).toString('base64'),
-        mimeType
+        image: base64,
+        mimeType,
+        ref
       })
     } else {
       logger.warn(`fetch image ${element.url} failed: ${res.status}`)

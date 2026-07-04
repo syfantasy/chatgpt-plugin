@@ -185,6 +185,36 @@ class ChatGPTConfig {
   }
 
   /**
+   * 视觉/图片处理配置
+   * @type {{
+   *   nonVisionStrategy: 'tool' | 'ignore',
+   *   visionChannelId: string,
+   *   imageDescriptionModel: string,
+   *   imageDescriptionSystemPrompt: string,
+   *   defaultQuestion: string,
+   *   maxImageSize: number,
+   *   enableGroupContextImages: boolean
+   * }}
+   */
+  vision = {
+    // 非视觉模型策略：'tool' - 替换为引用文本 + ask_about_image 工具
+    //                'ignore' - 仅替换为 [图片]
+    nonVisionStrategy: 'tool',
+    // 视觉模型渠道 ID（留空则自动查找第一个支持 visual 的渠道）
+    visionChannelId: '',
+    // 覆盖视觉模型（留空则使用渠道默认模型）
+    imageDescriptionModel: '',
+    // 图片描述时的系统提示词
+    imageDescriptionSystemPrompt: 'You are an image analysis assistant. Answer questions about images accurately and thoroughly.',
+    // 未指定 question 时的默认提问
+    defaultQuestion: '请详细描述这张图片的内容，包括场景、人物、物体、文字、颜色等所有可见细节。',
+    // 最大处理图片大小（bytes），默认 10MB
+    maxImageSize: 10485760,
+    // 是否将群聊上下文中的图片也存入历史（开启后图片会进入主干对话）
+    enableGroupContextImages: true
+  }
+
+  /**
    * 记忆系统配置
    * @type {{
    *   database: string,
@@ -549,7 +579,7 @@ Return a JSON array of strings only, without any other characters including \`\`
       return result
     }
 
-    const sections = ['version', 'basic', 'bym', 'llm', 'management', 'chaite', 'memory']
+    const sections = ['version', 'basic', 'bym', 'llm', 'management', 'chaite', 'vision', 'memory']
     for (const key of sections) {
       const loadedValue = loadedConfig[key]
       if (loadedValue === undefined) {
@@ -599,6 +629,7 @@ Return a JSON array of strings only, without any other characters including \`\`
         llm: this.llm,
         management: this.management,
         chaite: this.chaite,
+        vision: this.vision,
         memory: this.memory
       }
 
@@ -620,6 +651,7 @@ Return a JSON array of strings only, without any other characters including \`\`
       llm: this.llm,
       management: this.management,
       chaite: this.chaite,
+      vision: this.vision,
       memory: this.memory
     }
   }

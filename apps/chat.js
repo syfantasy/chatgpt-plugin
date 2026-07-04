@@ -5,7 +5,9 @@ import { YunzaiUserState } from '../models/chaite/storage/lowdb/user_state_stora
 import { getGroupContextPrompt, buildGroupContextMessages, getGroupHistory } from '../utils/group.js'
 import { buildMemoryPrompt } from '../models/memory/prompt.js'
 import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
+import { visionService } from '../utils/vision.js'
 import * as crypto from 'node:crypto'
+import fetch from 'node-fetch'
 
 export class Chat extends plugin {
   constructor () {
@@ -93,7 +95,7 @@ export class Chat extends plugin {
       }
     }
     // 群聊上下文：拆成独立消息，利用快照实现滑动窗口下的 prefix cache 复用
-    let groupContextMsgs = []
+    const groupContextMsgs = []
     const enableGroupContext = (preset.groupContext === 'use_system' || !preset.groupContext) ? Config.llm.enableGroupContext : (preset.groupContext === 'enabled')
     if (enableGroupContext && e.isGroup) {
       const groupContext = await buildGroupContextMessages(
@@ -112,7 +114,7 @@ export class Chat extends plugin {
           contextSegments.push(groupContext.header)
         }
         for (const m of groupContext.messages) {
-          groupContextMsgs.push(m.text)
+          groupContextMsgs.push(m)
         }
       }
     }
@@ -128,13 +130,37 @@ export class Chat extends plugin {
       }
     }
 
-    // 群聊消息逐条保存为独立 user message
-    for (const text of groupContextMsgs) {
+    // 群聊消息逐条保存为独立 user message，图片一并进入主干对话历史
+    for (const m of groupContextMsgs) {
+      const contents = [{ type: 'text', text: m.text }]
+      if (m.images && m.images.length > 0 && Config.vision?.enableGroupContextImages !== false) {
+        for (const img of m.images) {
+          try {
+            const res = await fetch(img.url)
+            if (res.ok) {
+              const mimeType = res.headers.get('content-type') || 'image/jpeg'
+              const buffer = Buffer.from(await res.arrayBuffer())
+              const base64 = buffer.toString('base64')
+              const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
+              contents.push({
+                type: 'image',
+                image: base64,
+                mimeType,
+                ref
+              })
+            } else {
+              logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
+            }
+          } catch (err) {
+            logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
+          }
+        }
+      }
       const msg = {
         id: crypto.randomUUID(),
         parentId: sendMessageOptions.parentMessageId,
         role: 'user',
-        content: [{ type: 'text', text }]
+        content: contents
       }
       await Chaite.getInstance().getHistoryManager().saveHistory(msg, sendMessageOptions.conversationId)
       sendMessageOptions.parentMessageId = msg.id

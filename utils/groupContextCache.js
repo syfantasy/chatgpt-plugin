@@ -107,11 +107,11 @@ export const groupContextCache = new GroupContextCache()
  * 格式化单条聊天消息为 prompt 行
  * @param {*} chat
  * @param {{groupContextTemplateMessage: string}} templates
- * @returns {{id: string, text: string}}
+ * @returns {{id: string, text: string, images: Array<{url: string}>}}
  */
 export function formatChatMessage (chat, templates) {
   const sender = chat.sender || {}
-  const id = String(chat.messageId || chat.seq || '')
+  const id = String(chat.messageId || chat.message_id || chat.seq || chat.message_seq || '')
   const text = templates.groupContextTemplateMessage
     .replace('${message.sender.card}', sender.card || '-')
     .replace('${message.sender.nickname}', sender.nickname || '-')
@@ -121,7 +121,23 @@ export function formatChatMessage (chat, templates) {
     .replace('${message.time}', chat.time ? formatTimeToBeiJing(chat.time) : '-')
     .replace('${message.messageId}', id || '-')
     .replace('${message.raw_message}', chat.raw_message || '-')
-  return { id, text }
+  // 从结构化消息中提取图片 URL（raw_message 中图片已变为 [图片] 文本）
+  const images = []
+  if (chat.message && Array.isArray(chat.message)) {
+    for (const elem of chat.message) {
+      if (elem.type === 'image') {
+        const url = elem.url || elem.data?.url || elem.file_url
+        if (url) {
+          images.push({ url })
+        } else {
+          logger.debug(`[GroupContext] 发现图片消息但无法提取URL: ${JSON.stringify(Object.keys(elem))} data keys: ${elem.data ? JSON.stringify(Object.keys(elem.data)) : 'no data'}`)
+        }
+      }
+    }
+  } else if (chat.raw_message?.includes('[图片]')) {
+    logger.debug(`[GroupContext] raw_message 包含[图片]但 chat.message 不可遍历: ${typeof chat.message}, isArray: ${Array.isArray(chat.message)}`)
+  }
+  return { id, text, images }
 }
 
 /**
@@ -148,6 +164,7 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
     .filter(m => m.id) // 必须有 messageId
 
   if (newMessages.length === 0) {
+    logger.debug(`[GroupContext] 收到 ${chats?.length || 0} 条群消息，但格式化后全部被过滤（检查 messageId/seq 字段兼容性）`)
     return { header: '', messages: [] }
   }
 

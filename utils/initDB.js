@@ -1,7 +1,7 @@
 // initDB.js
 // 插件初始化的基本数据库内容
 
-import { BaseClientOptions, Chaite, Channel, ProcessorDTO, SendMessageOption } from 'chaite'
+import { BaseClientOptions, Chaite, Channel, ProcessorDTO, SendMessageOption, ToolDTO } from 'chaite'
 import fs from 'fs'
 import path from 'path'
 import { md5 } from './common.js'
@@ -50,6 +50,23 @@ export async function migrateDatabase () {
     logger.info('初始化内置的屏蔽词后置处理器')
     await addEmbeddedProcessor(resourcesDir, processorsManager, 'post', 'BlackPreProcessor', '内置的屏蔽词前置处理器')
   }
+  // 注册内置的图片引用预处理器
+  const imageRefProcessorId = md5('ImageRefPreProcessor')
+  if (!await processorsManager.getInstance('ImageRefPreProcessor')) {
+    logger.info('初始化内置的图片引用预处理器')
+    const processorCode = fs.readFileSync(
+      path.resolve('./plugins/chatgpt-plugin/utils/processors', 'ImageRefPreProcessor.js'),
+      'utf-8'
+    )
+    await processorsManager.addInstance(new ProcessorDTO({
+      id: imageRefProcessorId,
+      type: 'pre',
+      name: 'ImageRefPreProcessor',
+      uploader: systemUser,
+      description: '自动处理图片：视觉模型保留原图进入主干对话，非视觉模型替换为引用文本，支持 ask_about_image 工具按需查询',
+      code: processorCode
+    }))
+  }
   // 2. 设置默认渠道
   const channelsManager = Chaite.getInstance().getChannelsManager()
   try {
@@ -69,6 +86,7 @@ export async function migrateDatabase () {
           features: ['tool', 'chat'],
           baseUrl: 'https://oneapi.ikechan8370.com/v1',
           apiKey: 'sk-uIzofH2TIMVu6giK56BeCeD5E98b42EbBe695597B5FeAc68',
+          preProcessorIds: [imageRefProcessorId],
           postProcessorIds: [md5('BlackPreProcessor'), md5('BlackPostProcessor')]
         }),
         uploader: systemUser
@@ -111,6 +129,34 @@ export async function migrateDatabase () {
 
   // 5. 扫描同步工具
   const toolManager = Chaite.getInstance().getToolsManager()
+
+  // 注册内置的 ask_about_image 工具
+  const askAboutImageToolId = md5('ask_about_image')
+  if (!await toolManager.getInstance('ask_about_image')) {
+    logger.info('初始化内置的 ask_about_image 工具')
+    const toolCode = fs.readFileSync(
+      path.resolve('./plugins/chatgpt-plugin/utils/tools', 'AskAboutImage.js'),
+      'utf-8'
+    )
+    await toolManager.addInstance(new ToolDTO({
+      id: askAboutImageToolId,
+      name: 'ask_about_image',
+      status: 'enabled',
+      permission: 'public',
+      uploader: systemUser,
+      description: '按引用ID查询图片内容，支持针对图片特定细节的定向提问（如颜色、文字、人物特征等）',
+      code: toolCode
+    }))
+  }
+
+  // 将 ask_about_image 加入默认工具组
+  if (await toolGroupsManager.getInstance('default_local')) {
+    const defaultGroup = await toolGroupsManager.getInstance('default_local')
+    if (defaultGroup && !defaultGroup.toolIds.includes(askAboutImageToolId)) {
+      defaultGroup.toolIds.push(askAboutImageToolId)
+      await toolGroupsManager.upsertInstance(defaultGroup)
+    }
+  }
 
   logger.info('初始化内置的工具组')
   logger.debug('数据库初始化完成')
