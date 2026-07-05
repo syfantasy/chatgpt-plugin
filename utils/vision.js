@@ -101,7 +101,7 @@ class VisionService {
   async askAboutImage (ref, question) {
     const image = this.loadImage(ref)
     if (!image) {
-      throw new Error(`图片 ${ref} 未找到，可能已被清理或从未缓存`)
+      throw new Error(`Image ${ref} not found; it may have been cleaned up or was never cached`)
     }
 
     const config = ChatGPTConfig.vision || {}
@@ -122,7 +122,7 @@ class VisionService {
       )
     }
     if (!visionChannel) {
-      throw new Error('没有可用的视觉模型渠道，请在配置中设置 vision.visionChannelId 或添加支持 visual 的渠道')
+      throw new Error('No available vision-capable channel. Set vision.visionChannelId or enable a model with visual feature.')
     }
 
     await visionChannel.ready()
@@ -138,24 +138,24 @@ class VisionService {
       features: ['chat', 'visual']
     })
 
-    const response = await client.sendMessage({
+    const response = await client.sendMessageWithHistory([{
       role: 'user',
       content: [
         { type: 'image', image: image.base64, mimeType: image.mimeType },
-        { type: 'text', text: question || config.defaultQuestion || '请详细描述这张图片的内容' }
+        { type: 'text', text: question || config.defaultQuestion || 'Describe this image in detail.' }
       ]
-    }, {
+    }], {
       model,
       systemOverride: systemPrompt
     })
 
-    const text = response.contents
+    const text = response.content
       .filter(c => c.type === 'text')
       .map(c => c.text)
       .join('\n')
 
     if (!text) {
-      return '（未能从图片中获取到文字描述）'
+      return '(No text description was returned from the image model.)'
     }
 
     return text
