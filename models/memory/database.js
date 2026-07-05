@@ -137,14 +137,27 @@ class SQLiteDatabase {
   }
 
   loadExtension (libraryPath) {
-    return new Promise((resolve, reject) => {
-      this.nativeDb.loadExtension(libraryPath, err => {
+    const tryLoad = candidate => new Promise((resolve, reject) => {
+      this.nativeDb.loadExtension(candidate, err => {
         if (err) {
           reject(err)
           return
         }
         resolve()
       })
+    })
+    return tryLoad(libraryPath).catch(async err => {
+      const ext = path.extname(libraryPath).toLowerCase()
+      if (!['.so', '.dylib', '.dll'].includes(ext)) {
+        throw err
+      }
+      const withoutExt = libraryPath.slice(0, -ext.length)
+      const message = String(err?.message || '')
+      if (!message.includes(`${libraryPath}${ext}`) && !message.includes(`${path.basename(libraryPath)}${ext}`)) {
+        throw err
+      }
+      logger?.debug?.('[Memory] retrying SQLite extension load without platform suffix:', withoutExt)
+      return await tryLoad(withoutExt)
     })
   }
 
