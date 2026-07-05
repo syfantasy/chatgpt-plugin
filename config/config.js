@@ -403,11 +403,17 @@ Return a JSON array of strings only, without any other characters including \`\`
     // 文件变更标志和保存定时器
     this._saveOrigin = null
     this._saveTimer = null
+    this._saveLastMtimeMs = 0
 
     // 监听文件变化
     this.watcher = fs.watchFile(this.configPath, (curr, prev) => {
-      if (curr.mtime !== prev.mtime && this._saveOrigin !== 'code') {
-        this.loadFromFile()
+      if (curr.mtimeMs !== prev.mtimeMs) {
+        if (this._saveLastMtimeMs && Math.abs(curr.mtimeMs - this._saveLastMtimeMs) <= 1) {
+          return
+        }
+        if (this._saveOrigin !== 'code') {
+          this.loadFromFile()
+        }
       }
     })
 
@@ -542,6 +548,33 @@ Return a JSON array of strings only, without any other characters including \`\`
   _mergeConfig (loadedConfig) {
     let changed = false
 
+    const isEqual = (left, right) => {
+      if (left === right) {
+        return true
+      }
+      if (Array.isArray(left) || Array.isArray(right)) {
+        if (!Array.isArray(left) || !Array.isArray(right)) {
+          return false
+        }
+        if (left.length !== right.length) {
+          return false
+        }
+        return left.every((item, index) => isEqual(item, right[index]))
+      }
+      if (left && right && typeof left === 'object' && typeof right === 'object') {
+        const leftKeys = Object.keys(left)
+        const rightKeys = Object.keys(right)
+        if (leftKeys.length !== rightKeys.length) {
+          return false
+        }
+        return leftKeys.every(key =>
+          Object.prototype.hasOwnProperty.call(right, key) &&
+          isEqual(left[key], right[key])
+        )
+      }
+      return false
+    }
+
     const mergeInto = (target, source) => {
       if (!source || typeof source !== 'object') {
         return target
@@ -570,10 +603,12 @@ Return a JSON array of strings only, without any other characters including \`\`
         if (sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue)) {
           result[key] = mergeInto(targetValue, sourceValue)
         } else {
-          if (targetValue === undefined || targetValue !== sourceValue) {
+          if (targetValue === undefined || !isEqual(targetValue, sourceValue)) {
             changed = true
           }
-          result[key] = sourceValue
+          result[key] = Array.isArray(sourceValue)
+            ? sourceValue.slice()
+            : sourceValue
         }
       }
       return result
@@ -638,6 +673,7 @@ Return a JSON array of strings only, without any other characters including \`\`
         : yaml.dump(config)
 
       fs.writeFileSync(this.configPath, content, 'utf8')
+      this._saveLastMtimeMs = fs.statSync(this.configPath).mtimeMs
     } catch (error) {
       console.error('Failed to save config:', error)
     }
