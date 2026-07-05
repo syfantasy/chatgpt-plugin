@@ -128,6 +128,7 @@ export class bym extends plugin {
         getGroupHistory
       )
       if (groupContext?.messages.length) {
+        const pendingHistoryMessages = []
         // 群聊 header 作为第一条
         if (groupContext.header) {
           const headerMsg = {
@@ -136,7 +137,7 @@ export class bym extends plugin {
             role: 'user',
             content: [{ type: 'text', text: groupContext.header }]
           }
-          await Chaite.getInstance().getHistoryManager().saveHistory(headerMsg, sendMessageOption.conversationId)
+          pendingHistoryMessages.push(headerMsg)
           sendMessageOption.parentMessageId = headerMsg.id
         }
         // 每条群消息独立保存，附带各自图片
@@ -171,8 +172,16 @@ export class bym extends plugin {
             role: 'user',
             content: contents
           }
-          await Chaite.getInstance().getHistoryManager().saveHistory(msg, sendMessageOption.conversationId)
+          pendingHistoryMessages.push(msg)
           sendMessageOption.parentMessageId = msg.id
+        }
+        const historyManager = Chaite.getInstance().getHistoryManager()
+        if (typeof historyManager.saveHistories === 'function') {
+          await historyManager.saveHistories(pendingHistoryMessages, sendMessageOption.conversationId)
+        } else {
+          for (const pendingHistoryMessage of pendingHistoryMessages) {
+            await historyManager.saveHistory(pendingHistoryMessage, sendMessageOption.conversationId)
+          }
         }
       }
     }
