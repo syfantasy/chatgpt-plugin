@@ -1,17 +1,7 @@
 import sqlite3 from 'sqlite3'
 import path from 'path'
+import { visionService } from './vision.js'
 import { dataDir, formatTimeToBeiJing } from './common.js'
-
-/**
- * 群聊上下文缓存 - 用于实现滑动窗口下的 prompt prefix cache 复用
- *
- * 原理：
- *   第N轮 QQ 返回 M1..M20，格式化后发给 LLM，同时存快照 {groupId: [M1..M20]}
- *   第N+1轮 QQ 返回 M5..M25
- *   → 快照中有 M1..M20，新消息 M5..M25 中 M5..M20 与快照重叠
- *   → 从快照取 M1..M4，与 M5..M25 拼接 → M1..M25
- *   → 发给 LLM 时，前 20 条 (M1..M20) 与上次完全一致 → prefix cache 命中
- */
 
 class GroupContextCache {
   constructor () {
@@ -27,13 +17,13 @@ class GroupContextCache {
     this._initPromise = new Promise((resolve, reject) => {
       const dbPath = path.join(dataDir, 'data.db')
       logger.debug(`[GroupContext] opening db at ${dbPath}`)
-      this.db = new sqlite3.Database(dbPath, (err) => {
+      this.db = new sqlite3.Database(dbPath, err => {
         if (err) return reject(err)
         this.db.run(`CREATE TABLE IF NOT EXISTS group_context_cache (
           groupId TEXT PRIMARY KEY,
           snapshot TEXT NOT NULL,
           updatedAt INTEGER NOT NULL
-        )`, (err) => {
+        )`, err => {
           if (err) return reject(err)
           this.initialized = true
           resolve()
@@ -44,9 +34,8 @@ class GroupContextCache {
   }
 
   /**
-   * 获取群的上一次快照
    * @param {string} groupId
-   * @returns {Promise<Array<{id: string, text: string}>|null>}
+   * @returns {Promise<Array<{id: string, text: string, images?: Array<{url: string}>}>|null>}
    */
   async getSnapshot (groupId) {
     await this._init()
@@ -56,7 +45,10 @@ class GroupContextCache {
         [String(groupId)],
         (err, row) => {
           if (err) return reject(err)
-          if (!row) { logger.debug(`[GroupContext] getSnapshot: no snapshot for group=${groupId}`); return resolve(null) }
+          if (!row) {
+            logger.debug(`[GroupContext] getSnapshot: no snapshot for group=${groupId}`)
+            return resolve(null)
+          }
           try {
             const msgs = JSON.parse(row.snapshot)
             logger.debug(`[GroupContext] getSnapshot ok: group=${groupId}, msgs=${msgs.length}`)
@@ -71,19 +63,18 @@ class GroupContextCache {
   }
 
   /**
-   * 保存快照
    * @param {string} groupId
-   * @param {Array<{id: string, text: string}>} messages
+   * @param {Array<{id: string, text: string, images?: Array<{url: string}>}>} messages
    */
   async saveSnapshot (groupId, messages) {
     await this._init()
     const snapshot = JSON.stringify(messages)
     const now = Date.now()
-    return new Promise((resolve, reject) => {
+    return new Promise(resolve => {
       this.db.run(
-        `INSERT OR REPLACE INTO group_context_cache (groupId, snapshot, updatedAt) VALUES (?, ?, ?)`,
+        'INSERT OR REPLACE INTO group_context_cache (groupId, snapshot, updatedAt) VALUES (?, ?, ?)',
         [String(groupId), snapshot, now],
-        function (err) {
+        err => {
           if (err) logger.error(`[GroupContext] saveSnapshot failed: ${err.message}`)
           else logger.debug(`[GroupContext] saveSnapshot ok: group=${groupId}, msgs=${messages.length}, bytes=${snapshot.length}`)
           resolve()
@@ -93,13 +84,12 @@ class GroupContextCache {
   }
 
   /**
-   * 清理过期快照 (超过指定毫秒未更新)
-   * @param {number} maxAgeMs 默认 1 小时
+   * @param {number} maxAgeMs
    */
   async cleanup (maxAgeMs = 3600000) {
     await this._init()
     const cutoff = Date.now() - maxAgeMs
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       this.db.run(
         'DELETE FROM group_context_cache WHERE updatedAt < ?',
         [cutoff],
@@ -111,15 +101,82 @@ class GroupContextCache {
 
 export const groupContextCache = new GroupContextCache()
 
+function getMessageId (chat) {
+  return String(chat.messageId || chat.message_id || chat.seq || chat.message_seq || '')
+}
+
+function extractMediaUrl (elem) {
+  if (!elem || typeof elem !== 'object') return ''
+  const data = elem.data || {}
+  return elem.url ||
+    elem.file_url ||
+    elem.image_url ||
+    elem.src ||
+    data.url ||
+    data.file_url ||
+    data.image_url ||
+    data.originUrl ||
+    data.origin_url ||
+    data.preview ||
+    data.thumb ||
+    data.bigUrl ||
+    data.big_url ||
+    data.src ||
+    ''
+}
+
+function isImageLikeElem (elem) {
+  return ['image', 'mface', 'bface', 'sface', 'marketface'].includes(elem?.type)
+}
+
+function imageRefText (ref) {
+  return `[图片 ref:${ref}，可使用 ask_about_image 工具查看图片内容]`
+}
+
+async function buildImageRefs (chat) {
+  const refs = []
+  if (!Array.isArray(chat.message)) {
+    if (chat.raw_message?.includes('[图片]') || chat.raw_message?.includes('[动画表情]')) {
+      logger.debug(`[GroupContext] raw_message contains image marker but chat.message is not iterable: ${typeof chat.message}, isArray: ${Array.isArray(chat.message)}`)
+    }
+    return refs
+  }
+
+  for (const elem of chat.message) {
+    if (!isImageLikeElem(elem)) continue
+    const url = extractMediaUrl(elem)
+    if (!url) {
+      logger.debug(`[GroupContext] found image-like message but cannot extract URL: type=${elem.type}, keys=${JSON.stringify(Object.keys(elem))}, dataKeys=${elem.data ? JSON.stringify(Object.keys(elem.data)) : 'no data'}`)
+      continue
+    }
+
+    try {
+      const saved = await visionService.saveImage(url)
+      refs.push(saved.ref)
+    } catch (err) {
+      logger.warn(`[GroupContext] failed to save history image ref from ${url}: ${err.message}`)
+    }
+  }
+  return refs
+}
+
 /**
- * 格式化单条聊天消息为 prompt 行
+ * Format one group chat message. Images in history are represented only as
+ * stable text refs, never as image content for the main conversation.
+ *
  * @param {*} chat
  * @param {{groupContextTemplateMessage: string}} templates
- * @returns {{id: string, text: string, images: Array<{url: string}>}}
+ * @returns {Promise<{id: string, text: string, images: Array<{url: string}>}>}
  */
-export function formatChatMessage (chat, templates) {
+export async function formatChatMessage (chat, templates) {
   const sender = chat.sender || {}
-  const id = String(chat.messageId || chat.message_id || chat.seq || chat.message_seq || '')
+  const id = getMessageId(chat)
+  let rawMessage = chat.raw_message || '-'
+  const refs = await buildImageRefs(chat)
+  if (refs.length > 0) {
+    rawMessage = `${rawMessage} ${refs.map(imageRefText).join(' ')}`
+  }
+
   const text = templates.groupContextTemplateMessage
     .replace('${message.sender.card}', sender.card || '-')
     .replace('${message.sender.nickname}', sender.nickname || '-')
@@ -128,70 +185,54 @@ export function formatChatMessage (chat, templates) {
     .replace('${message.sender.title}', sender.title || '-')
     .replace('${message.time}', chat.time ? formatTimeToBeiJing(chat.time) : '-')
     .replace('${message.messageId}', id || '-')
-    .replace('${message.raw_message}', chat.raw_message || '-')
-  // 从结构化消息中提取图片 URL（raw_message 中图片已变为 [图片] 文本）
-  const images = []
-  if (chat.message && Array.isArray(chat.message)) {
-    for (const elem of chat.message) {
-      if (elem.type === 'image') {
-        const url = elem.url || elem.data?.url || elem.file_url
-        if (url) {
-          images.push({ url })
-        } else {
-          logger.debug(`[GroupContext] 发现图片消息但无法提取URL: ${JSON.stringify(Object.keys(elem))} data keys: ${elem.data ? JSON.stringify(Object.keys(elem.data)) : 'no data'}`)
-        }
-      }
-    }
-  } else if (chat.raw_message?.includes('[图片]')) {
-    logger.debug(`[GroupContext] raw_message 包含[图片]但 chat.message 不可遍历: ${typeof chat.message}, isArray: ${Array.isArray(chat.message)}`)
-  }
-  return { id, text, images }
+    .replace('${message.raw_message}', rawMessage)
+
+  return { id, text, images: [] }
 }
 
 /**
- * 构建群聊上下文的独立消息列表（带缓存对齐）
- *
- * 利用快照实现滑动窗口下的 prefix cache 复用：
- * - 首次调用：直接返回新消息，并存快照
- * - 后续调用：找到重叠部分，从快照补全前缀，使旧消息位置不变
+ * Build aligned group context messages for better prompt-cache reuse.
  *
  * @param {*} e event
- * @param {number} length 消息条数
+ * @param {number} length
  * @param {{groupContextTemplatePrefix: string, groupContextTemplateMessage: string, groupContextTemplateSuffix: string}} templates
- * @param {function} getHistoryFn 获取聊天历史的函数 (e, length) => chats[]
- * @returns {Promise<{header: string, messages: Array<{id: string, text: string}>}>}
+ * @param {function} getHistoryFn
+ * @returns {Promise<{header: string, messages: Array<{id: string, text: string, images?: Array<{url: string}>}>}>}
  */
 export async function buildGroupContextMessages (e, length, templates, getHistoryFn) {
-  const { groupContextTemplatePrefix = '', groupContextTemplateSuffix = '' } = templates
+  const { groupContextTemplatePrefix = '' } = templates
   const chats = await getHistoryFn(e, length)
+  const groupId = String(e.group_id || e.group?.group_id || 'unknown')
 
-  // 格式化每条消息
-  const newMessages = chats
-    .filter(chat => chat)
-    .map(chat => formatChatMessage(chat, templates))
-    .filter(m => m.id) // 必须有 messageId
+  const snapshot = await groupContextCache.getSnapshot(groupId)
+  const snapshotById = new Map((snapshot || []).map(m => [m.id, m]))
+
+  const newMessages = []
+  for (const chat of chats.filter(chat => chat)) {
+    const id = getMessageId(chat)
+    const cached = snapshotById.get(id)
+    if (cached?.text?.includes('[图片 ref:')) {
+      newMessages.push({ ...cached, images: [] })
+      continue
+    }
+
+    const formatted = await formatChatMessage(chat, templates)
+    if (formatted.id) newMessages.push(formatted)
+  }
 
   if (newMessages.length === 0) {
-    logger.debug(`[GroupContext] 收到 ${chats?.length || 0} 条群消息，但格式化后全部被过滤（检查 messageId/seq 字段兼容性）`)
+    logger.debug(`[GroupContext] received ${chats?.length || 0} chats but no formatted messages; check messageId/seq compatibility`)
     return { header: '', messages: [] }
   }
 
-  const groupId = String(e.group_id || e.group?.group_id || 'unknown')
-
-  // 构建 header
   const header = groupContextTemplatePrefix
     .replace('${group.group_id}', groupId)
     .replace('${group.name}', e.group?.name || e.group_name || 'unknown')
 
-  // 尝试用快照对齐
-  const snapshot = await groupContextCache.getSnapshot(groupId)
-
   let allMessages
   if (!snapshot || snapshot.length === 0) {
-    // 首次，没有快照，直接使用新消息
     allMessages = newMessages
   } else {
-    // 在快照中找新消息第一条出现的位置（重叠起点）
     const snapshotIdMap = new Map(snapshot.map((m, i) => [m.id, i]))
     let overlapStartInSnapshot = -1
     let overlapStartInNew = -1
@@ -206,11 +247,11 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
     }
 
     if (overlapStartInSnapshot < 0) {
-      // 没有重叠（消息被清空或间隔太久），直接用新的
       allMessages = newMessages
     } else {
-      // 有重叠：从快照取重叠之前的消息，与完整新消息拼接
-      const prefixFromSnapshot = snapshot.slice(0, overlapStartInSnapshot)
+      const prefixFromSnapshot = snapshot
+        .slice(0, overlapStartInSnapshot)
+        .map(m => ({ ...m, images: [] }))
       allMessages = [...prefixFromSnapshot, ...newMessages]
       logger.debug(
         `[GroupContext] cache alignment: snapshot=${snapshot.length}, new=${newMessages.length}, ` +
@@ -220,12 +261,12 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
     }
   }
 
-  // 保存对齐后的完整结果作为快照，旧消息不会因 QQ 窗口滚动而丢失
-  // 限制最大长度防止无限增长：min(length * 3, 100)
   const maxSnapshotMsgs = Math.min(length * 3, 100)
   if (allMessages.length > maxSnapshotMsgs) {
     allMessages = allMessages.slice(-maxSnapshotMsgs)
   }
+
+  allMessages = allMessages.map(m => ({ ...m, images: [] }))
   await groupContextCache.saveSnapshot(groupId, allMessages)
 
   return { header, messages: allMessages }
