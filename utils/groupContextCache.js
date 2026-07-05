@@ -286,7 +286,10 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
     }
   }
 
-  const maxSnapshotMsgs = Math.min(length * 3, 100)
+  // Keep the cached prefix stable for many turns. A small sliding window breaks
+  // llama.cpp prompt-cache reuse because dropping the first row changes the
+  // prompt immediately after the header.
+  const maxSnapshotMsgs = Math.min(Math.max(length * 10, 200), 500)
   if (allMessages.length > maxSnapshotMsgs) {
     allMessages = allMessages.slice(-maxSnapshotMsgs)
   }
