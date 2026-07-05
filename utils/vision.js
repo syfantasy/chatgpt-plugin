@@ -108,14 +108,17 @@ class VisionService {
     const channelsManager = Chaite.getInstance().getChannelsManager()
     const allChannels = await channelsManager.getAllChannels()
 
-    // Find a vision-capable channel
+    const isVisualModel = model => model?.features?.includes('visual')
+    const getVisualModel = channel => channel.models?.find(isVisualModel)
+
+    // Find a vision-capable channel. Features are stored per model in newer Chaite.
     let visionChannel
     if (config.visionChannelId) {
       visionChannel = allChannels.find(c => c.id === config.visionChannelId)
     }
     if (!visionChannel) {
       visionChannel = allChannels.find(
-        c => c.status === 'enabled' && c.options?.features?.includes('visual')
+        c => c.status === 'enabled' && getVisualModel(c)
       )
     }
     if (!visionChannel) {
@@ -124,7 +127,8 @@ class VisionService {
 
     await visionChannel.ready()
 
-    const model = config.imageDescriptionModel || visionChannel.models?.[0]
+    const visualModel = getVisualModel(visionChannel) || visionChannel.models?.[0]
+    const model = config.imageDescriptionModel || visualModel?.name
     const systemPrompt = config.imageDescriptionSystemPrompt ||
       'You are an image analysis assistant. Answer questions about images accurately and thoroughly.'
 
