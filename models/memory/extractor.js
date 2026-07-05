@@ -185,8 +185,16 @@ Return a JSON array of strings only, without any other characters including \`\`
   const userTemplate = config.extractionUserPrompt || `下面是用户与机器人的对话，请根据系统提示提取可长期记忆的个人信息。如果没有值得记忆的内容，返回空数组[]。
 
 \${messages}`
+  const speakerOnlyRules = `STRICT SPEAKER-ONLY RULES:
+- Extract memories ONLY about the human speaker whose messages are labeled as the user in this prompt.
+- Do NOT extract facts about people the speaker mentions, quotes, @mentions, replies to, or talks about.
+- Do NOT extract facts from the assistant's text unless it clearly confirms or restates information about the same human speaker.
+- If a sentence says another person likes, owns, works at, studies, lives in, plans, or prefers something, ignore it for this user's personal memory.
+- When uncertain whether the fact is about the speaker, return nothing for that fact.`
   return {
     system: `${systemTemplate}
+
+${speakerOnlyRules}
 
 ${buildExistingMemorySection(existingMemories)}`,
     userTemplate

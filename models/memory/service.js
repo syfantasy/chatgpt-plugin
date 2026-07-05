@@ -214,11 +214,11 @@ class MemoryService {
     }
   }
 
-  async listUserMemories (userId, groupId = null, limit = 50, offset = 0) {
+  async listUserMemories (userId, groupId = null, limit = 50, offset = 0, options = {}) {
     if (!await this.ensureStores()) {
       return []
     }
-    return await this.userStore.listUserMemories(userId, groupId, limit, offset)
+    return await this.userStore.listUserMemories(userId, groupId, limit, offset, options)
   }
 
   async deleteUserMemory (memoryId, userId = null) {

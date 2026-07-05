@@ -140,10 +140,11 @@ export class UserMemoryStore {
     return transaction(prepared)
   }
 
-  async listUserMemories (userId = null, groupId = null, limit = 50, offset = 0) {
+  async listUserMemories (userId = null, groupId = null, limit = 50, offset = 0, options = {}) {
     await this.ensureDb()
     const normUserId = normaliseId(userId)
     const normGroupId = normaliseId(groupId)
+    const includeGlobal = options.includeGlobal !== false
     const params = []
     let query = `
       SELECT * FROM user_memory
@@ -154,7 +155,7 @@ export class UserMemoryStore {
       params.push(normUserId)
     }
     if (normGroupId) {
-      if (normUserId) {
+      if (normUserId && includeGlobal) {
         query += ' AND (group_id = ? OR group_id IS NULL)'
       } else {
         query += ' AND group_id = ?'

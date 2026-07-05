@@ -118,7 +118,9 @@ export class MemoryManager extends plugin {
       await e.reply('私人记忆未开启或您未被授权。')
       return false
     }
-    const memories = await memoryService.listUserMemories(userId, e.isGroup ? e.group_id : null)
+    const memories = await memoryService.listUserMemories(userId, e.isGroup ? e.group_id : null, 50, 0, {
+      includeGlobal: false
+    })
 
     if (!memories.length) {
       await e.reply('🧠 您的记忆：\n暂无记录~')
@@ -151,7 +153,9 @@ export class MemoryManager extends plugin {
       return false
     }
 
-    const memories = await memoryService.listUserMemories(at, e.group_id)
+    const memories = await memoryService.listUserMemories(at, e.group_id, 50, 0, {
+      includeGlobal: false
+    })
 
     if (!memories.length) {
       await e.reply('🧠 TA的记忆：\n暂无记录~')

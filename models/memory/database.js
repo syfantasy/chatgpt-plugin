@@ -456,7 +456,7 @@ async function applySimpleExtension (db) {
     }
     return
   } catch (error) {
-    logger?.error?.('Failed to load simple extension:', error)
+    logger?.warn?.('Failed to load simple extension; falling back to unicode61 tokenizer:', error)
     resetSimpleState({
       requested: true,
       enabled: true,
