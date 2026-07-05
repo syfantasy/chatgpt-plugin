@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import * as crypto from 'node:crypto'
 import fetch from 'node-fetch'
-import { Chaite, createClient } from 'chaite'
+import { Chaite, ChaiteContext, createClient } from 'chaite'
 import ChatGPTConfig from '../config/config.js'
 import { dataDir } from './common.js'
 
@@ -132,24 +132,34 @@ class VisionService {
     const systemPrompt = config.imageDescriptionSystemPrompt ||
       'You are an image analysis assistant. Answer questions about images accurately and thoroughly.'
 
+    const chaite = Chaite.getInstance()
+    const context = new ChaiteContext(chaite.getLogger?.())
+    context.setChaite(chaite)
+
     const client = createClient(visionChannel.adapterType, {
       baseUrl: visionChannel.options.baseUrl,
       apiKey: visionChannel.options.apiKey,
       features: ['chat', 'visual']
-    })
+    }, context)
 
-    const response = await client.sendMessageWithHistory([{
+    const response = await client.sendMessage({
       role: 'user',
       content: [
         { type: 'image', image: image.base64, mimeType: image.mimeType },
         { type: 'text', text: question || config.defaultQuestion || 'Describe this image in detail.' }
       ]
-    }], {
+    }, {
       model,
-      systemOverride: systemPrompt
+      systemOverride: systemPrompt,
+      disableHistoryRead: true,
+      disableHistorySave: true,
+      preProcessorIds: [],
+      postProcessorIds: [],
+      toolGroupId: [],
+      toolChoice: { type: 'none' }
     })
 
-    const text = response.content
+    const text = response.contents
       .filter(c => c.type === 'text')
       .map(c => c.text)
       .join('\n')
