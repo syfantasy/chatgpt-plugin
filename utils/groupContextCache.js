@@ -1,5 +1,6 @@
 import sqlite3 from 'sqlite3'
 import path from 'path'
+import * as crypto from 'node:crypto'
 import { visionService } from './vision.js'
 import { dataDir, formatTimeToBeiJing } from './common.js'
 
@@ -130,19 +131,40 @@ function isImageLikeElem (elem) {
 }
 
 function imageRefText (ref) {
-  return `[图片 ref:${ref}，可使用 ask_about_image 工具查看图片内容]`
+  return `[\u56fe\u7247 ref:${ref}\uff0c\u53ef\u4f7f\u7528 ask_about_image \u5de5\u5177\u67e5\u770b\u56fe\u7247\u5185\u5bb9]`
+}
+
+function hasImageRefText (message) {
+  return typeof message?.text === 'string' && message.text.includes('[\u56fe\u7247 ref:')
+}
+
+function chatHasImageLikeElem (chat) {
+  return Array.isArray(chat.message) && chat.message.some(isImageLikeElem)
+}
+
+function stableImageRef (chat, elem, index) {
+  const id = getMessageId(chat) ||
+    `${chat.group_id || ''}:${chat.time || ''}:${chat.sender?.user_id || ''}:${chat.raw_message || ''}`
+  const key = [
+    'group-context-image',
+    id,
+    index,
+    elem?.type || ''
+  ].join(':')
+  return crypto.createHash('md5').update(key).digest('hex')
 }
 
 async function buildImageRefs (chat) {
   const refs = []
   if (!Array.isArray(chat.message)) {
-    if (chat.raw_message?.includes('[图片]') || chat.raw_message?.includes('[动画表情]')) {
+    if (chat.raw_message?.includes('[\u56fe\u7247]') || chat.raw_message?.includes('[\u52a8\u753b\u8868\u60c5]')) {
       logger.debug(`[GroupContext] raw_message contains image marker but chat.message is not iterable: ${typeof chat.message}, isArray: ${Array.isArray(chat.message)}`)
     }
     return refs
   }
 
-  for (const elem of chat.message) {
+  for (let i = 0; i < chat.message.length; i++) {
+    const elem = chat.message[i]
     if (!isImageLikeElem(elem)) continue
     const url = extractMediaUrl(elem)
     if (!url) {
@@ -150,9 +172,12 @@ async function buildImageRefs (chat) {
       continue
     }
 
+    const ref = stableImageRef(chat, elem, i)
     try {
-      const saved = await visionService.saveImage(url)
-      refs.push(saved.ref)
+      if (!visionService.hasImage(ref)) {
+        await visionService.saveImage(url, 'image/jpeg', ref)
+      }
+      refs.push(ref)
     } catch (err) {
       logger.warn(`[GroupContext] failed to save history image ref from ${url}: ${err.message}`)
     }
@@ -211,7 +236,7 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
   for (const chat of chats.filter(chat => chat)) {
     const id = getMessageId(chat)
     const cached = snapshotById.get(id)
-    if (cached?.text?.includes('[图片 ref:')) {
+    if (cached && !(chatHasImageLikeElem(chat) && !hasImageRefText(cached))) {
       newMessages.push({ ...cached, images: [] })
       continue
     }

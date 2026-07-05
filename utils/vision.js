@@ -21,22 +21,24 @@ class VisionService {
    * @param {string} mimeType
    * @returns {{ref: string, mimeType: string, ext: string, filePath: string}}
    */
-  saveImageFromBuffer (buffer, mimeType = 'image/jpeg') {
+  saveImageFromBuffer (buffer, mimeType = 'image/jpeg', refOverride = '') {
     const md5 = crypto.createHash('md5').update(buffer).digest('hex')
+    const ref = refOverride || md5
+    const normalizedMimeType = String(mimeType || 'image/jpeg').split(';')[0].trim()
     const extMap = {
       'image/jpeg': '.jpg',
       'image/png': '.png',
       'image/gif': '.gif',
       'image/webp': '.webp'
     }
-    const ext = extMap[mimeType] || '.png'
-    const filePath = path.join(IMAGES_DIR, `${md5}${ext}`)
+    const ext = extMap[normalizedMimeType] || '.png'
+    const filePath = path.join(IMAGES_DIR, `${ref}${ext}`)
 
     if (!fs.existsSync(filePath)) {
       fs.writeFileSync(filePath, buffer)
     }
 
-    return { ref: md5, mimeType, ext, filePath }
+    return { ref, mimeType: normalizedMimeType, ext, filePath }
   }
 
   /**
@@ -45,7 +47,7 @@ class VisionService {
    * @param {string} mimeType
    * @returns {Promise<{ref: string, mimeType: string, ext: string, filePath: string}>}
    */
-  async saveImage (source, mimeType = 'image/jpeg') {
+  async saveImage (source, mimeType = 'image/jpeg', refOverride = '') {
     let buffer
 
     if (source.startsWith('http://') || source.startsWith('https://')) {
@@ -63,7 +65,7 @@ class VisionService {
       buffer = Buffer.from(source, 'base64')
     }
 
-    return this.saveImageFromBuffer(buffer, mimeType)
+    return this.saveImageFromBuffer(buffer, mimeType, refOverride)
   }
 
   /**
