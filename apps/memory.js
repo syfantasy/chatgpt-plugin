@@ -101,7 +101,7 @@ export class MemoryManager extends plugin {
   }
 
   async collect (e) {
-    collector.push(e)
+    await collector.push(e)
     return false
   }
 
@@ -115,7 +115,7 @@ export class MemoryManager extends plugin {
       await e.reply('私人记忆未开启或您未被授权。')
       return false
     }
-    const memories = memoryService.listUserMemories(userId, e.isGroup ? e.group_id : null)
+    const memories = await memoryService.listUserMemories(userId, e.isGroup ? e.group_id : null)
 
     if (!memories.length) {
       await e.reply('🧠 您的记忆：\n暂无记录~')
@@ -148,7 +148,7 @@ export class MemoryManager extends plugin {
       return false
     }
 
-    const memories = memoryService.listUserMemories(at, e.group_id)
+    const memories = await memoryService.listUserMemories(at, e.group_id)
 
     if (!memories.length) {
       await e.reply('🧠 TA的记忆：\n暂无记录~')
@@ -182,7 +182,7 @@ export class MemoryManager extends plugin {
       await e.reply('私人记忆未开启或您未被授权。')
       return false
     }
-    const success = memoryService.deleteUserMemory(memoryId, userId)
+    const success = await memoryService.deleteUserMemory(memoryId, userId)
     await e.reply(success ? '已删除指定记忆。' : '未找到对应的记忆条目。')
     return success
   }
@@ -197,7 +197,7 @@ export class MemoryManager extends plugin {
       return false
     }
     await collector.flush(e.group_id)
-    const facts = memoryService.listGroupFacts(e.group_id)
+    const facts = await memoryService.listGroupFacts(e.group_id)
 
     if (!facts.length) {
       await e.reply('📚 本群记忆：\n暂无群记忆。')
@@ -236,7 +236,7 @@ export class MemoryManager extends plugin {
     if (!factId) {
       return false
     }
-    const success = memoryService.deleteGroupFact(e.group_id, factId)
+    const success = await memoryService.deleteGroupFact(e.group_id, factId)
     await e.reply(success ? '已删除群记忆。' : '未找到对应的群记忆。')
     return success
   }

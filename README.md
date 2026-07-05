@@ -49,7 +49,7 @@ ChatGPT-Plugin 以 Chaite 为内核，将多模型渠道、工具、处理器、
    cd chatgpt-plugin
    pnpm install
    ```
-   若安装日志出现 `Ignored build scripts: better-sqlite3` 或运行时报错找不到 `better-sqlite3` bindings，可执行 `pnpm approve-builds`，在交互列表中勾选全部或仅 `better-sqlite3` 以允许编译。然后再次 `pnpm install`
+   本地记忆功能使用宿主环境常见的 `sqlite3` 驱动；`sqlite-vec` 仅用于向量检索增强，作为可选依赖处理。若 `sqlite-vec` 在当前平台不可用，记忆功能仍会保留基础存储、关键词检索与 LIKE 回退。
 3. **在 Yunzai 中启用插件**
     - 重启机器人或运行 `node app` 让插件自动加载。
     - 首次启动会在 `plugins/chatgpt-plugin/config/` 下生成 `config.json / config.yaml`。

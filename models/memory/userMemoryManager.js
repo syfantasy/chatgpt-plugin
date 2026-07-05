@@ -99,7 +99,7 @@ export async function processUserMemory ({ event, userMessage, userText, assista
     return
   }
 
-  const existingRecords = memoryService.listUserMemories(userId, e.isGroup ? e.group_id : null, 50)
+  const existingRecords = await memoryService.listUserMemories(userId, e.isGroup ? e.group_id : null, 50)
   const existingTexts = existingRecords.map(record => record.value).filter(Boolean)
   const memories = await extractUserMemories(snippets, existingTexts)
   if (!memories || memories.length === 0) {
@@ -107,7 +107,7 @@ export async function processUserMemory ({ event, userMessage, userText, assista
   }
 
   const enriched = normaliseMemoriesInput(memories, userMessageId)
-  memoryService.upsertUserMemories(
+  await memoryService.upsertUserMemories(
     userId,
     e.isGroup ? e.group_id : null,
     enriched
