@@ -94,9 +94,9 @@ export class Chat extends plugin {
         logger.debug(`[Memory] memory prompt: ${memoryPrompt}`)
       }
     }
-    // 群聊上下文：拆成独立消息，利用快照实现滑动窗口下的 prefix cache 复用
-    const groupContextMsgs = []
+    // 群聊上下文：收集图片，文本拼入 contextSegments
     const enableGroupContext = (preset.groupContext === 'use_system' || !preset.groupContext) ? Config.llm.enableGroupContext : (preset.groupContext === 'enabled')
+    const contextImages = []
     if (enableGroupContext && e.isGroup) {
       const groupContext = await buildGroupContextMessages(
         e,
@@ -109,61 +109,55 @@ export class Chat extends plugin {
         getGroupHistory
       )
       if (groupContext?.messages.length) {
-        // header 并入记忆所在的消息
         if (groupContext.header) {
           contextSegments.push(groupContext.header)
         }
+        const lines = []
         for (const m of groupContext.messages) {
-          groupContextMsgs.push(m)
-        }
-      }
-    }
-
-    // 记忆 + 群聊 header → 拼到用户消息前面（chat 模式不单独持久化，避免历史链断裂）
-    if (contextSegments.length > 0) {
-      const contextText = contextSegments.join('\n\n')
-      const textContent = userMessage.content.find(c => c.type === 'text')
-      if (textContent) {
-        textContent.text = contextText + '\n\n' + textContent.text
-      } else {
-        userMessage.content.unshift({ type: 'text', text: contextText })
-      }
-    }
-
-    // 群聊消息逐条保存为独立 user message，图片一并进入主干对话历史
-    for (const m of groupContextMsgs) {
-      const contents = [{ type: 'text', text: m.text }]
-      if (m.images && m.images.length > 0 && Config.vision?.enableGroupContextImages !== false) {
-        for (const img of m.images) {
-          try {
-            const res = await fetch(img.url)
-            if (res.ok) {
-              const mimeType = res.headers.get('content-type') || 'image/jpeg'
-              const buffer = Buffer.from(await res.arrayBuffer())
-              const base64 = buffer.toString('base64')
-              const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
-              contents.push({
-                type: 'image',
-                image: base64,
-                mimeType,
-                ref
-              })
-            } else {
-              logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
+          lines.push(m.text)
+          if (m.images && m.images.length > 0 && Config.vision?.enableGroupContextImages !== false) {
+            for (const img of m.images) {
+              try {
+                const res = await fetch(img.url)
+                if (res.ok) {
+                  const mimeType = res.headers.get('content-type') || 'image/jpeg'
+                  const buffer = Buffer.from(await res.arrayBuffer())
+                  const base64 = buffer.toString('base64')
+                  const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
+                  contextImages.push({
+                    type: 'image',
+                    image: base64,
+                    mimeType,
+                    ref
+                  })
+                } else {
+                  logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
+                }
+              } catch (err) {
+                logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
+              }
             }
-          } catch (err) {
-            logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
           }
         }
+        contextSegments.push(lines.join('\n'))
       }
-      const msg = {
+    }
+
+    // 上下文（记忆 + 群聊 header + 群聊消息 + 图片）作为一条独立 user 消息，
+    // 插入到已有对话历史和本轮用户消息之间
+    if (contextSegments.length > 0 || contextImages.length > 0) {
+      const contextText = contextSegments.join('\n\n')
+      const contextContent = []
+      if (contextText) contextContent.push({ type: 'text', text: contextText })
+      contextContent.push(...contextImages)
+      const contextMsg = {
         id: crypto.randomUUID(),
         parentId: sendMessageOptions.parentMessageId,
         role: 'user',
-        content: contents
+        content: contextContent
       }
-      await Chaite.getInstance().getHistoryManager().saveHistory(msg, sendMessageOptions.conversationId)
-      sendMessageOptions.parentMessageId = msg.id
+      await Chaite.getInstance().getHistoryManager().saveHistory(contextMsg, sendMessageOptions.conversationId)
+      sendMessageOptions.parentMessageId = contextMsg.id
     }
     const response = await Chaite.getInstance().sendMessage(userMessage, e, {
       ...sendMessageOptions,

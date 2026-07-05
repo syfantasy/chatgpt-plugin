@@ -110,24 +110,12 @@ export class bym extends plugin {
         this.reply(forwardElement)
       }
     }
-    // 构建动态上下文，作为独立 user message 插入历史
-    // 从 system prompt 中分离，保持 system prompt 静态以利用 LLM prefix cache
-    const contextSegments = []
-    contextSegments.push(`Current Time: ${formatTimeToBeiJing(new Date().getTime())}`)
-    if (userText) {
-      const memoryPrompt = await buildMemoryPrompt({
-        userId: e.sender.user_id + '',
-        groupId: e.isGroup ? e.group_id + '' : null,
-        queryText: userText
-      })
-      if (memoryPrompt) {
-        contextSegments.push(memoryPrompt)
-        logger.debug(`[Memory] bym memory prompt: ${memoryPrompt}`)
-      }
-    }
+    // === 缓存友好的消息顺序：稳定内容在前，动态内容在后 ===
+    // 1. 群聊上下文 header + 对齐后的群消息（逐条，含图片）—— 前缀缓存命中
+    // 2. Current Time + Memory —— 动态变化，但在缓存前缀之后
+    // 3. 当前用户消息
 
-    // 群聊上下文：拆成独立消息，利用快照实现滑动窗口下的 prefix cache 复用
-    const groupContextMsgs = []
+    // 步骤1: 先保存群聊上下文（稳定前缀）
     if (ChatGPTConfig.llm.enableGroupContext && e.isGroup) {
       const groupContext = await buildGroupContextMessages(
         e,
@@ -140,63 +128,79 @@ export class bym extends plugin {
         getGroupHistory
       )
       if (groupContext?.messages.length) {
-        // header 并入时间戳/记忆所在的消息
+        // 群聊 header 作为第一条
         if (groupContext.header) {
-          contextSegments.push(groupContext.header)
-        }
-        for (const m of groupContext.messages) {
-          groupContextMsgs.push(m)
-        }
-      }
-    }
-
-    // 保存时间戳 + 记忆 + 群聊 header 为一条消息
-    if (contextSegments.length > 0) {
-      const contextText = contextSegments.join('\n\n')
-      const contextMsg = {
-        id: crypto.randomUUID(),
-        parentId: sendMessageOption.parentMessageId,
-        role: 'user',
-        content: [{ type: 'text', text: contextText }]
-      }
-      await Chaite.getInstance().getHistoryManager().saveHistory(contextMsg, sendMessageOption.conversationId)
-      sendMessageOption.parentMessageId = contextMsg.id
-    }
-
-    // 群聊消息逐条保存为独立 user message，图片一并进入主干对话历史
-    for (const m of groupContextMsgs) {
-      const contents = [{ type: 'text', text: m.text }]
-      if (m.images && m.images.length > 0 && ChatGPTConfig.vision?.enableGroupContextImages !== false) {
-        for (const img of m.images) {
-          try {
-            const res = await fetch(img.url)
-            if (res.ok) {
-              const mimeType = res.headers.get('content-type') || 'image/jpeg'
-              const buffer = Buffer.from(await res.arrayBuffer())
-              const base64 = buffer.toString('base64')
-              const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
-              contents.push({
-                type: 'image',
-                image: base64,
-                mimeType,
-                ref
-              })
-            } else {
-              logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
-            }
-          } catch (err) {
-            logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
+          const headerMsg = {
+            id: crypto.randomUUID(),
+            parentId: sendMessageOption.parentMessageId,
+            role: 'user',
+            content: [{ type: 'text', text: groupContext.header }]
           }
+          await Chaite.getInstance().getHistoryManager().saveHistory(headerMsg, sendMessageOption.conversationId)
+          sendMessageOption.parentMessageId = headerMsg.id
+        }
+        // 每条群消息独立保存，附带各自图片
+        for (const m of groupContext.messages) {
+          const contents = [{ type: 'text', text: m.text }]
+          if (m.images && m.images.length > 0 && ChatGPTConfig.vision?.enableGroupContextImages !== false) {
+            for (const img of m.images) {
+              try {
+                const res = await fetch(img.url)
+                if (res.ok) {
+                  const mimeType = res.headers.get('content-type') || 'image/jpeg'
+                  const buffer = Buffer.from(await res.arrayBuffer())
+                  const base64 = buffer.toString('base64')
+                  const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
+                  contents.push({
+                    type: 'image',
+                    image: base64,
+                    mimeType,
+                    ref
+                  })
+                } else {
+                  logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
+                }
+              } catch (err) {
+                logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
+              }
+            }
+          }
+          const msg = {
+            id: crypto.randomUUID(),
+            parentId: sendMessageOption.parentMessageId,
+            role: 'user',
+            content: contents
+          }
+          await Chaite.getInstance().getHistoryManager().saveHistory(msg, sendMessageOption.conversationId)
+          sendMessageOption.parentMessageId = msg.id
         }
       }
-      const msg = {
+    }
+
+    // 步骤2: 动态上下文（Current Time + Memory）—— 在群聊上下文之后
+    const dynamicSegments = []
+    dynamicSegments.push(`Current Time: ${formatTimeToBeiJing(new Date().getTime())}`)
+    if (userText) {
+      const memoryPrompt = await buildMemoryPrompt({
+        userId: e.sender.user_id + '',
+        groupId: e.isGroup ? e.group_id + '' : null,
+        queryText: userText
+      })
+      if (memoryPrompt) {
+        dynamicSegments.push(memoryPrompt)
+        logger.debug(`[Memory] bym memory prompt: ${memoryPrompt}`)
+      }
+    }
+    if (dynamicSegments.length > 0) {
+      const dynamicText = dynamicSegments.join('\n\n')
+      const dynamicMsg = {
         id: crypto.randomUUID(),
         parentId: sendMessageOption.parentMessageId,
         role: 'user',
-        content: contents
+        content: [{ type: 'text', text: dynamicText }]
       }
-      await Chaite.getInstance().getHistoryManager().saveHistory(msg, sendMessageOption.conversationId)
-      sendMessageOption.parentMessageId = msg.id
+      await Chaite.getInstance().getHistoryManager().saveHistory(dynamicMsg, sendMessageOption.conversationId)
+      sendMessageOption.parentMessageId = dynamicMsg.id
     }
     // 发送
     const response = await Chaite.getInstance().sendMessage(userMessage, e, {

@@ -26,6 +26,7 @@ class GroupContextCache {
 
     this._initPromise = new Promise((resolve, reject) => {
       const dbPath = path.join(dataDir, 'data.db')
+      logger.debug(`[GroupContext] opening db at ${dbPath}`)
       this.db = new sqlite3.Database(dbPath, (err) => {
         if (err) return reject(err)
         this.db.run(`CREATE TABLE IF NOT EXISTS group_context_cache (
@@ -55,10 +56,13 @@ class GroupContextCache {
         [String(groupId)],
         (err, row) => {
           if (err) return reject(err)
-          if (!row) return resolve(null)
+          if (!row) { logger.debug(`[GroupContext] getSnapshot: no snapshot for group=${groupId}`); return resolve(null) }
           try {
-            resolve(JSON.parse(row.snapshot))
-          } catch {
+            const msgs = JSON.parse(row.snapshot)
+            logger.debug(`[GroupContext] getSnapshot ok: group=${groupId}, msgs=${msgs.length}`)
+            resolve(msgs)
+          } catch (e) {
+            logger.error(`[GroupContext] getSnapshot parse error: ${e.message}`)
             resolve(null)
           }
         }
@@ -79,7 +83,11 @@ class GroupContextCache {
       this.db.run(
         `INSERT OR REPLACE INTO group_context_cache (groupId, snapshot, updatedAt) VALUES (?, ?, ?)`,
         [String(groupId), snapshot, now],
-        (err) => resolve()
+        function (err) {
+          if (err) logger.error(`[GroupContext] saveSnapshot failed: ${err.message}`)
+          else logger.debug(`[GroupContext] saveSnapshot ok: group=${groupId}, msgs=${messages.length}, bytes=${snapshot.length}`)
+          resolve()
+        }
       )
     })
   }
@@ -212,8 +220,13 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
     }
   }
 
-  // 保存新快照（只保存本轮 QQ 返回的消息，不含旧前缀）
-  await groupContextCache.saveSnapshot(groupId, newMessages)
+  // 保存对齐后的完整结果作为快照，旧消息不会因 QQ 窗口滚动而丢失
+  // 限制最大长度防止无限增长：min(length * 3, 100)
+  const maxSnapshotMsgs = Math.min(length * 3, 100)
+  if (allMessages.length > maxSnapshotMsgs) {
+    allMessages = allMessages.slice(-maxSnapshotMsgs)
+  }
+  await groupContextCache.saveSnapshot(groupId, allMessages)
 
   return { header, messages: allMessages }
 }
