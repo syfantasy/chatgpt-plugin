@@ -10,6 +10,14 @@ import { isVisualModelForSendOptions, visionService } from '../utils/vision.js'
 import * as crypto from 'node:crypto'
 import fetch from 'node-fetch'
 
+function getEventUserId (e) {
+  const userId = e?.user_id ?? e?.sender?.user_id
+  if (userId === null || userId === undefined) {
+    return ''
+  }
+  return String(userId).trim()
+}
+
 export class bym extends plugin {
   constructor () {
     super({
@@ -31,6 +39,7 @@ export class bym extends plugin {
     if (!Chaite.getInstance()) {
       return false
     }
+    const userId = getEventUserId(e)
     if (!ChatGPTConfig.bym.enable) {
       return false
     }
@@ -98,7 +107,7 @@ export class bym extends plugin {
     // 伪人不记录历史
     // sendMessageOption.disableHistoryRead = true
     // sendMessageOption.disableHistorySave = true
-    sendMessageOption.conversationId = 'bym' + e.user_id + Date.now()
+    sendMessageOption.conversationId = 'bym' + userId + Date.now()
     sendMessageOption.parentMessageId = undefined
     // 设置多轮调用回掉
     sendMessageOption.onMessageWithToolCall = async content => {
@@ -194,7 +203,7 @@ export class bym extends plugin {
     dynamicSegments.push(`Current Time: ${formatTimeToBeiJing(new Date().getTime())}`)
     if (userText) {
       const memoryPrompt = await buildMemoryPrompt({
-        userId: e.sender.user_id + '',
+        userId,
         groupId: e.isGroup ? e.group_id + '' : null,
         queryText: userText
       })

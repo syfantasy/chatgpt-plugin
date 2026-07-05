@@ -9,6 +9,14 @@ import { isVisualModelForSendOptions, visionService } from '../utils/vision.js'
 import * as crypto from 'node:crypto'
 import fetch from 'node-fetch'
 
+function getEventUserId (e) {
+  const userId = e?.user_id ?? e?.sender?.user_id
+  if (userId === null || userId === undefined) {
+    return ''
+  }
+  return String(userId).trim()
+}
+
 export class Chat extends plugin {
   constructor () {
     super({
@@ -31,6 +39,7 @@ export class Chat extends plugin {
     if (!Chaite.getInstance()) {
       return false
     }
+    const userId = getEventUserId(e)
     let state = await Chaite.getInstance().getUserStateStorage().getItem(e.sender.user_id + '')
     if (!state) {
       state = new YunzaiUserState(e.sender.user_id, e.sender.nickname, e.sender.card)
@@ -85,7 +94,7 @@ export class Chat extends plugin {
     const contextSegments = []
     if (userText) {
       const memoryPrompt = await buildMemoryPrompt({
-        userId: e.sender.user_id + '',
+        userId,
         groupId: e.isGroup ? e.group_id + '' : null,
         queryText: userText
       })
