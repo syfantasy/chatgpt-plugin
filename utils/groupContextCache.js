@@ -286,12 +286,12 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
     }
   }
 
-  // Keep the cached prefix stable for many turns. A small sliding window breaks
-  // llama.cpp prompt-cache reuse because dropping the first row changes the
-  // prompt immediately after the header.
+  // Keep the cached prefix stable for many turns. Once the high-water mark is
+  // reached, shrink back to the configured history length in one step instead
+  // of sliding by a few rows every turn.
   const maxSnapshotMsgs = Math.min(Math.max(length * 10, 200), 500)
   if (allMessages.length > maxSnapshotMsgs) {
-    allMessages = allMessages.slice(-maxSnapshotMsgs)
+    allMessages = allMessages.slice(-length)
   }
 
   allMessages = allMessages.map(m => ({ ...m, images: [] }))
