@@ -106,6 +106,9 @@ export class MemoryManager extends plugin {
   }
 
   async showUserMemory (e) {
+    if (e.isGroup && getAtUserId(e)) {
+      return await this.showTargetUserMemory(e)
+    }
     const userId = getEventUserId(e)
     if (!userId) {
       await e.reply('无法识别您的用户ID，暂时不能查询私人记忆。')
