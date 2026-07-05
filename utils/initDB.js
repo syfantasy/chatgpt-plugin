@@ -16,6 +16,18 @@ const systemUser = {
 }
 
 /**
+ * Read bundled executable code from the tracked resources directory. Runtime
+ * tool and processor directories are ignored because they contain user code.
+ * @param {string} resourcesDir
+ * @param {string} filename
+ * @returns {string}
+ */
+function readEmbeddedCode (resourcesDir, filename) {
+  const encoded = fs.readFileSync(path.resolve(resourcesDir, filename), 'utf-8')
+  return Buffer.from(encoded.trim(), 'base64').toString('utf-8')
+}
+
+/**
  * 注入内置的处理器
  * @param {string} resourcesDir
  * @param {import('chaite').ProcessorsManager} processorsManager
@@ -25,12 +37,12 @@ const systemUser = {
  * @returns {Promise<void>}
  */
 async function addEmbeddedProcessor (resourcesDir, processorsManager, type, name, description) {
-  const codeBuf = fs.readFileSync(path.resolve(resourcesDir, name))
-  let code = Buffer.from(codeBuf.toString(), 'base64').toString()
+  const code = readEmbeddedCode(resourcesDir, name)
   await processorsManager.addInstance(new ProcessorDTO({
     id: md5(name),
     type,
     name,
+    embedded: true,
     uploader: systemUser,
     description,
     code
@@ -52,19 +64,19 @@ export async function migrateDatabase () {
   }
   // 注册内置的图片引用预处理器
   const imageRefProcessorId = md5('ImageRefPreProcessor')
-  if (!await processorsManager.getInstance('ImageRefPreProcessor')) {
+  const imageRefProcessorCode = readEmbeddedCode(resourcesDir, 'ImageRefPreProcessor')
+  const storedImageRefProcessor = await processorsManager.getInstanceT(imageRefProcessorId)
+  const loadedImageRefProcessor = await processorsManager.getInstance('ImageRefPreProcessor')
+  if (!storedImageRefProcessor || storedImageRefProcessor.code !== imageRefProcessorCode || !loadedImageRefProcessor) {
     logger.info('初始化内置的图片引用预处理器')
-    const processorCode = fs.readFileSync(
-      path.resolve('./plugins/chatgpt-plugin/utils/processors', 'ImageRefPreProcessor.js'),
-      'utf-8'
-    )
     await processorsManager.addInstance(new ProcessorDTO({
       id: imageRefProcessorId,
       type: 'pre',
       name: 'ImageRefPreProcessor',
+      embedded: true,
       uploader: systemUser,
       description: '自动处理图片：视觉模型保留原图进入主干对话，非视觉模型替换为引用文本，支持 ask_about_image 工具按需查询',
-      code: processorCode
+      code: imageRefProcessorCode
     }))
   }
   // 2. 设置默认渠道
@@ -132,20 +144,20 @@ export async function migrateDatabase () {
 
   // 注册内置的 ask_about_image 工具
   const askAboutImageToolId = md5('ask_about_image')
-  if (!await toolManager.getInstance('ask_about_image')) {
+  const askAboutImageToolCode = readEmbeddedCode(resourcesDir, 'AskAboutImage')
+  const storedAskAboutImageTool = await toolManager.getInstanceT(askAboutImageToolId)
+  const loadedAskAboutImageTool = await toolManager.getInstance('ask_about_image')
+  if (!storedAskAboutImageTool || storedAskAboutImageTool.code !== askAboutImageToolCode || !loadedAskAboutImageTool) {
     logger.info('初始化内置的 ask_about_image 工具')
-    const toolCode = fs.readFileSync(
-      path.resolve('./plugins/chatgpt-plugin/utils/tools', 'AskAboutImage.js'),
-      'utf-8'
-    )
     await toolManager.addInstance(new ToolDTO({
       id: askAboutImageToolId,
       name: 'ask_about_image',
+      embedded: true,
       status: 'enabled',
       permission: 'public',
       uploader: systemUser,
       description: '按引用ID查询图片内容，支持针对图片特定细节的定向提问（如颜色、文字、人物特征等）',
-      code: toolCode
+      code: askAboutImageToolCode
     }))
   }
 
