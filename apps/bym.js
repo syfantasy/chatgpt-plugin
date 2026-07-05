@@ -6,7 +6,7 @@ import { getGroupContextPrompt, buildGroupContextMessages, getGroupHistory } fro
 import { formatTimeToBeiJing } from '../utils/common.js'
 import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
 import { buildMemoryPrompt } from '../models/memory/prompt.js'
-import { visionService } from '../utils/vision.js'
+import { isVisualModelForSendOptions, visionService } from '../utils/vision.js'
 import * as crypto from 'node:crypto'
 import fetch from 'node-fetch'
 
@@ -116,6 +116,8 @@ export class bym extends plugin {
     // 3. 当前用户消息
 
     // 步骤1: 先保存群聊上下文（稳定前缀）
+    const includeGroupContextImages = ChatGPTConfig.vision?.enableGroupContextImages !== false &&
+      await isVisualModelForSendOptions(sendMessageOption, preset)
     if (ChatGPTConfig.llm.enableGroupContext && e.isGroup) {
       const groupContext = await buildGroupContextMessages(
         e,
@@ -125,7 +127,8 @@ export class bym extends plugin {
           groupContextTemplateMessage: ChatGPTConfig.llm.groupContextTemplateMessage,
           groupContextTemplateSuffix: ChatGPTConfig.llm.groupContextTemplateSuffix
         },
-        getGroupHistory
+        getGroupHistory,
+        { includeImages: includeGroupContextImages }
       )
       if (groupContext?.messages.length) {
         const pendingHistoryMessages = []

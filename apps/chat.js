@@ -5,7 +5,7 @@ import { YunzaiUserState } from '../models/chaite/storage/lowdb/user_state_stora
 import { getGroupContextPrompt, buildGroupContextMessages, getGroupHistory } from '../utils/group.js'
 import { buildMemoryPrompt } from '../models/memory/prompt.js'
 import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
-import { visionService } from '../utils/vision.js'
+import { isVisualModelForSendOptions, visionService } from '../utils/vision.js'
 import * as crypto from 'node:crypto'
 import fetch from 'node-fetch'
 
@@ -97,6 +97,8 @@ export class Chat extends plugin {
     // 群聊上下文：收集图片，文本拼入 contextSegments
     const enableGroupContext = (preset.groupContext === 'use_system' || !preset.groupContext) ? Config.llm.enableGroupContext : (preset.groupContext === 'enabled')
     const contextImages = []
+    const includeGroupContextImages = Config.vision?.enableGroupContextImages !== false &&
+      await isVisualModelForSendOptions(sendMessageOptions, preset)
     if (enableGroupContext && e.isGroup) {
       const groupContext = await buildGroupContextMessages(
         e,
@@ -106,7 +108,8 @@ export class Chat extends plugin {
           groupContextTemplateMessage: Config.llm.groupContextTemplateMessage,
           groupContextTemplateSuffix: Config.llm.groupContextTemplateSuffix
         },
-        getGroupHistory
+        getGroupHistory,
+        { includeImages: includeGroupContextImages }
       )
       if (groupContext?.messages.length) {
         if (groupContext.header) {

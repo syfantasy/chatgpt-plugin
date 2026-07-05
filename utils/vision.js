@@ -189,3 +189,26 @@ class VisionService {
 }
 
 export const visionService = new VisionService()
+
+export async function isVisualModelForSendOptions (sendMessageOption = {}, preset = null) {
+  const modelName = sendMessageOption?.model || preset?.sendMessageOption?.model || ''
+  if (!modelName) return false
+
+  const chaite = Chaite.getInstance()
+  const channelsManager = chaite?.getChannelsManager?.()
+  if (!channelsManager?.getChannelByModel) return false
+
+  try {
+    const channels = await channelsManager.getChannelByModel(modelName)
+    const channel = channels?.find(c => c.status === 'enabled') || channels?.[0]
+    if (!channel) return false
+
+    const features = channel.getOptionsForModel?.(modelName)?.features ||
+      channel.models?.find(model => model.name === modelName)?.features ||
+      []
+    return features.includes('visual')
+  } catch (err) {
+    logger.warn(`[Vision] failed to detect visual feature for model ${modelName}: ${err.message}`)
+    return false
+  }
+}

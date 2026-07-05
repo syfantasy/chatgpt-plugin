@@ -185,21 +185,39 @@ async function buildImageRefs (chat) {
   return refs
 }
 
+function buildImageEntries (chat) {
+  if (!Array.isArray(chat.message)) return []
+
+  const images = []
+  for (const elem of chat.message) {
+    if (!isImageLikeElem(elem)) continue
+    const url = extractMediaUrl(elem)
+    if (url) images.push({ url })
+  }
+  return images
+}
+
 /**
- * Format one group chat message. Images in history are represented only as
- * stable text refs, never as image content for the main conversation.
+ * Format one group chat message. For visual models, images can stay as image
+ * content; otherwise they are represented as stable text refs.
  *
  * @param {*} chat
  * @param {{groupContextTemplateMessage: string}} templates
+ * @param {{includeImages?: boolean}} options
  * @returns {Promise<{id: string, text: string, images: Array<{url: string}>}>}
  */
-export async function formatChatMessage (chat, templates) {
+export async function formatChatMessage (chat, templates, options = {}) {
   const sender = chat.sender || {}
   const id = getMessageId(chat)
   let rawMessage = chat.raw_message || '-'
-  const refs = await buildImageRefs(chat)
-  if (refs.length > 0) {
-    rawMessage = `${rawMessage} ${refs.map(imageRefText).join(' ')}`
+  let images = []
+  if (options.includeImages) {
+    images = buildImageEntries(chat)
+  } else {
+    const refs = await buildImageRefs(chat)
+    if (refs.length > 0) {
+      rawMessage = `${rawMessage} ${refs.map(imageRefText).join(' ')}`
+    }
   }
 
   const text = templates.groupContextTemplateMessage
@@ -212,7 +230,7 @@ export async function formatChatMessage (chat, templates) {
     .replace('${message.messageId}', id || '-')
     .replace('${message.raw_message}', rawMessage)
 
-  return { id, text, images: [] }
+  return { id, text, images }
 }
 
 /**
@@ -222,10 +240,12 @@ export async function formatChatMessage (chat, templates) {
  * @param {number} length
  * @param {{groupContextTemplatePrefix: string, groupContextTemplateMessage: string, groupContextTemplateSuffix: string}} templates
  * @param {function} getHistoryFn
+ * @param {{includeImages?: boolean}} options
  * @returns {Promise<{header: string, messages: Array<{id: string, text: string, images?: Array<{url: string}>}>}>}
  */
-export async function buildGroupContextMessages (e, length, templates, getHistoryFn) {
+export async function buildGroupContextMessages (e, length, templates, getHistoryFn, options = {}) {
   const { groupContextTemplatePrefix = '' } = templates
+  const includeImages = !!options.includeImages
   const chats = await getHistoryFn(e, length)
   const groupId = String(e.group_id || e.group?.group_id || 'unknown')
 
@@ -236,12 +256,15 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
   for (const chat of chats.filter(chat => chat)) {
     const id = getMessageId(chat)
     const cached = snapshotById.get(id)
-    if (cached && !(chatHasImageLikeElem(chat) && !hasImageRefText(cached))) {
+    const hasImage = chatHasImageLikeElem(chat)
+    const shouldAttachImages = includeImages && hasImage
+    const shouldUpgradeRefs = !includeImages && hasImage && !hasImageRefText(cached)
+    if (cached && !shouldAttachImages && !shouldUpgradeRefs) {
       newMessages.push({ ...cached, images: [] })
       continue
     }
 
-    const formatted = await formatChatMessage(chat, templates)
+    const formatted = await formatChatMessage(chat, templates, { includeImages })
     if (formatted.id) newMessages.push(formatted)
   }
 
@@ -294,8 +317,7 @@ export async function buildGroupContextMessages (e, length, templates, getHistor
     allMessages = allMessages.slice(-length)
   }
 
-  allMessages = allMessages.map(m => ({ ...m, images: [] }))
-  await groupContextCache.saveSnapshot(groupId, allMessages)
+  await groupContextCache.saveSnapshot(groupId, allMessages.map(m => ({ ...m, images: [] })))
 
   return { header, messages: allMessages }
 }
