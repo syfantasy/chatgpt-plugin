@@ -131,7 +131,7 @@ function isImageLikeElem (elem) {
 }
 
 function imageRefText (ref) {
-  return `[\u56fe\u7247 ref:${ref}\uff0c\u53ef\u4f7f\u7528 ask_about_image \u5de5\u5177\u67e5\u770b\u56fe\u7247\u5185\u5bb9]`
+  return `[\u56fe\u7247 ref:${ref}]`
 }
 
 function hasImageRefText (message) {
@@ -154,13 +154,13 @@ function stableImageRef (chat, elem, index) {
   return crypto.createHash('md5').update(key).digest('hex')
 }
 
-async function buildImageRefs (chat) {
-  const refs = []
+async function buildImageInfos (chat, options = {}) {
+  const images = []
   if (!Array.isArray(chat.message)) {
     if (chat.raw_message?.includes('[\u56fe\u7247]') || chat.raw_message?.includes('[\u52a8\u753b\u8868\u60c5]')) {
       logger.debug(`[GroupContext] raw_message contains image marker but chat.message is not iterable: ${typeof chat.message}, isArray: ${Array.isArray(chat.message)}`)
     }
-    return refs
+    return images
   }
 
   for (let i = 0; i < chat.message.length; i++) {
@@ -174,32 +174,21 @@ async function buildImageRefs (chat) {
 
     const ref = stableImageRef(chat, elem, i)
     try {
-      if (!visionService.hasImage(ref)) {
+      visionService.rememberImageSource(ref, { url })
+      if (options.cacheImage && !visionService.hasImage(ref)) {
         await visionService.saveImage(url, 'image/jpeg', ref)
       }
-      refs.push(ref)
+      images.push({ ref, url })
     } catch (err) {
       logger.warn(`[GroupContext] failed to save history image ref from ${url}: ${err.message}`)
     }
-  }
-  return refs
-}
-
-function buildImageEntries (chat) {
-  if (!Array.isArray(chat.message)) return []
-
-  const images = []
-  for (const elem of chat.message) {
-    if (!isImageLikeElem(elem)) continue
-    const url = extractMediaUrl(elem)
-    if (url) images.push({ url })
   }
   return images
 }
 
 /**
- * Format one group chat message. For visual models, images can stay as image
- * content; otherwise they are represented as stable text refs.
+ * Format one group chat message. Images always get stable text refs; visual
+ * models can additionally receive image content in the main conversation.
  *
  * @param {*} chat
  * @param {{groupContextTemplateMessage: string}} templates
@@ -210,14 +199,9 @@ export async function formatChatMessage (chat, templates, options = {}) {
   const sender = chat.sender || {}
   const id = getMessageId(chat)
   let rawMessage = chat.raw_message || '-'
-  let images = []
-  if (options.includeImages) {
-    images = buildImageEntries(chat)
-  } else {
-    const refs = await buildImageRefs(chat)
-    if (refs.length > 0) {
-      rawMessage = `${rawMessage} ${refs.map(imageRefText).join(' ')}`
-    }
+  const images = await buildImageInfos(chat, { cacheImage: !options.includeImages })
+  if (images.length > 0) {
+    rawMessage = `${rawMessage} ${images.map(image => imageRefText(image.ref)).join(' ')}`
   }
 
   const text = templates.groupContextTemplateMessage

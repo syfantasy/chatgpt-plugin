@@ -7,12 +7,47 @@ import ChatGPTConfig from '../config/config.js'
 import { dataDir } from './common.js'
 
 const IMAGES_DIR = path.join(dataDir, 'images')
+const IMAGE_REFS_PATH = path.join(IMAGES_DIR, 'refs.json')
 
 class VisionService {
   constructor () {
     if (!fs.existsSync(IMAGES_DIR)) {
       fs.mkdirSync(IMAGES_DIR, { recursive: true })
     }
+    this.refs = this._loadRefs()
+  }
+
+  _loadRefs () {
+    try {
+      if (!fs.existsSync(IMAGE_REFS_PATH)) return {}
+      return JSON.parse(fs.readFileSync(IMAGE_REFS_PATH, 'utf-8'))
+    } catch (err) {
+      logger.warn(`[Vision] failed to load image refs: ${err.message}`)
+      return {}
+    }
+  }
+
+  _saveRefs () {
+    try {
+      fs.writeFileSync(IMAGE_REFS_PATH, JSON.stringify(this.refs, null, 2))
+    } catch (err) {
+      logger.warn(`[Vision] failed to save image refs: ${err.message}`)
+    }
+  }
+
+  rememberImageSource (ref, source = {}) {
+    if (!ref) return
+    const current = this.refs[ref] || {}
+    const cleanSource = Object.fromEntries(
+      Object.entries(source).filter(([key, value]) => value !== undefined && value !== null && !(key === 'url' && value === ''))
+    )
+    this.refs[ref] = {
+      ...current,
+      ...cleanSource,
+      ref,
+      updatedAt: Date.now()
+    }
+    this._saveRefs()
   }
 
   /**
@@ -21,7 +56,7 @@ class VisionService {
    * @param {string} mimeType
    * @returns {{ref: string, mimeType: string, ext: string, filePath: string}}
    */
-  saveImageFromBuffer (buffer, mimeType = 'image/jpeg', refOverride = '') {
+  saveImageFromBuffer (buffer, mimeType = 'image/jpeg', refOverride = '', source = {}) {
     const md5 = crypto.createHash('md5').update(buffer).digest('hex')
     const ref = refOverride || md5
     const normalizedMimeType = String(mimeType || 'image/jpeg').split(';')[0].trim()
@@ -38,6 +73,12 @@ class VisionService {
       fs.writeFileSync(filePath, buffer)
     }
 
+    this.rememberImageSource(ref, {
+      ...source,
+      mimeType: normalizedMimeType,
+      filePath
+    })
+
     return { ref, mimeType: normalizedMimeType, ext, filePath }
   }
 
@@ -49,8 +90,10 @@ class VisionService {
    */
   async saveImage (source, mimeType = 'image/jpeg', refOverride = '') {
     let buffer
+    let sourceUrl = ''
 
     if (source.startsWith('http://') || source.startsWith('https://')) {
+      sourceUrl = source
       const res = await fetch(source)
       if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`)
       buffer = Buffer.from(await res.arrayBuffer())
@@ -65,7 +108,7 @@ class VisionService {
       buffer = Buffer.from(source, 'base64')
     }
 
-    return this.saveImageFromBuffer(buffer, mimeType, refOverride)
+    return this.saveImageFromBuffer(buffer, mimeType, refOverride, { url: sourceUrl })
   }
 
   /**
@@ -186,9 +229,26 @@ class VisionService {
     }
     return false
   }
+
+  resolveImageRef (ref) {
+    if (!ref) return null
+    const cached = this.refs[ref] || {}
+    const image = this.loadImage(ref)
+    if (!cached.url && !image) return null
+    return {
+      ref,
+      url: cached.url || '',
+      mimeType: cached.mimeType || image?.mimeType || '',
+      filePath: cached.filePath || image?.filePath || ''
+    }
+  }
 }
 
 export const visionService = new VisionService()
+
+export function resolveImageRef (ref) {
+  return visionService.resolveImageRef(ref)
+}
 
 export async function isVisualModelForSendOptions (sendMessageOption = {}, preset = null) {
   const modelName = sendMessageOption?.model || preset?.sendMessageOption?.model || ''

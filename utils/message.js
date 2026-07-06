@@ -3,6 +3,10 @@ import common from '../../../lib/common/common.js'
 import fetch from 'node-fetch'
 import { visionService } from './vision.js'
 
+function imageRefText (ref) {
+  return `[\u56fe\u7247 ref:${ref}]`
+}
+
 /**
  * 将e中的消息转换为chaite的UserMessage
  *
@@ -31,6 +35,7 @@ export async function intoUserMessage (e, options = {}) {
     togglePrefix = null
   } = options
   const contents = []
+  const imageRefs = []
   let text = ''
   if ((e.source || e.reply_id) && (handleReplyImage || handleReplyText || handleReplyFile)) {
     let seq = e.isGroup ? (e.source?.seq || e.reply_id) : (e.source?.time || e.source?.time)
@@ -50,13 +55,14 @@ export async function intoUserMessage (e, options = {}) {
             const mimeType = res.headers.get('content-type') || 'image/jpeg'
             const buffer = Buffer.from(await res.arrayBuffer())
             const base64 = buffer.toString('base64')
-            const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
+            const { ref } = visionService.saveImageFromBuffer(buffer, mimeType, '', { url: val.url })
             contents.push({
               type: 'image',
               image: base64,
               mimeType,
               ref
             })
+            imageRefs.push(ref)
           } else {
             logger.warn(`fetch image ${val.url} failed: ${res.status}`)
           }
@@ -103,13 +109,14 @@ export async function intoUserMessage (e, options = {}) {
       const mimeType = res.headers.get('content-type') || 'image/jpeg'
       const buffer = Buffer.from(await res.arrayBuffer())
       const base64 = buffer.toString('base64')
-      const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
+      const { ref } = visionService.saveImageFromBuffer(buffer, mimeType, '', { url: element.url })
       contents.push({
         type: 'image',
         image: base64,
         mimeType,
         ref
       })
+      imageRefs.push(ref)
     } else {
       logger.warn(`fetch image ${element.url} failed: ${res.status}`)
     }
@@ -118,6 +125,9 @@ export async function intoUserMessage (e, options = {}) {
   if (toggleMode === 'prefix') {
     const regex = new RegExp(`^#?(图片)?${togglePrefix}[^gpt]`)
     text = text.replace(regex, '')
+  }
+  if (imageRefs.length > 0) {
+    text = `${text}${text ? ' ' : ''}${imageRefs.map(imageRefText).join(' ')}`
   }
   if (text) {
     contents.push({

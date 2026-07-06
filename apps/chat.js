@@ -135,7 +135,7 @@ export class Chat extends plugin {
                   const mimeType = res.headers.get('content-type') || 'image/jpeg'
                   const buffer = Buffer.from(await res.arrayBuffer())
                   const base64 = buffer.toString('base64')
-                  const { ref } = visionService.saveImageFromBuffer(buffer, mimeType)
+                  const { ref } = visionService.saveImageFromBuffer(buffer, mimeType, img.ref, { url: img.url })
                   contextImages.push({
                     type: 'image',
                     image: base64,

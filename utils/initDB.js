@@ -161,11 +161,33 @@ export async function migrateDatabase () {
     }))
   }
 
+  const resolveImageRefToolId = md5('resolve_image_ref')
+  const resolveImageRefToolCode = readEmbeddedCode(resourcesDir, 'ResolveImageRef')
+  const storedResolveImageRefTool = await toolManager.getInstanceT(resolveImageRefToolId)
+  const loadedResolveImageRefTool = await toolManager.getInstance('resolve_image_ref')
+  if (!storedResolveImageRefTool || storedResolveImageRefTool.code !== resolveImageRefToolCode || !loadedResolveImageRefTool) {
+    logger.info('init embedded resolve_image_ref tool')
+    await toolManager.addInstance(new ToolDTO({
+      id: resolveImageRefToolId,
+      name: 'resolve_image_ref',
+      embedded: true,
+      status: 'enabled',
+      permission: 'public',
+      uploader: systemUser,
+      description: 'Resolve image ref to original image URL for image processing tools',
+      code: resolveImageRefToolCode
+    }))
+  }
+
   // 将 ask_about_image 加入默认工具组
   if (await toolGroupsManager.getInstance('default_local')) {
     const defaultGroup = await toolGroupsManager.getInstance('default_local')
     if (defaultGroup && !defaultGroup.toolIds.includes(askAboutImageToolId)) {
       defaultGroup.toolIds.push(askAboutImageToolId)
+      await toolGroupsManager.upsertInstance(defaultGroup)
+    }
+    if (defaultGroup && !defaultGroup.toolIds.includes(resolveImageRefToolId)) {
+      defaultGroup.toolIds.push(resolveImageRefToolId)
       await toolGroupsManager.upsertInstance(defaultGroup)
     }
   }
