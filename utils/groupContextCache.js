@@ -236,7 +236,7 @@ export async function formatChatMessage (chat, templates, options = {}) {
   const sender = chat.sender || {}
   const id = getMessageId(chat)
   let rawMessage = chat.raw_message || '-'
-  const images = await buildImageInfos(chat, { cacheImage: true })
+  const images = await buildImageInfos(chat, { cacheImage: !options.includeImages })
   if (images.length > 0) {
     rawMessage = `${rawMessage} ${images.map(imageRefText).join(' ')}`
   }
