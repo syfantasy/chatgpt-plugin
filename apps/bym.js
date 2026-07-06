@@ -158,21 +158,27 @@ export class bym extends plugin {
           if (m.images && m.images.length > 0 && ChatGPTConfig.vision?.enableGroupContextImages !== false) {
             for (const img of m.images) {
               try {
-                const res = await fetch(img.url)
-                if (res.ok) {
+                let cached = visionService.loadImage(img.ref)
+                if (!cached) {
+                  const res = await fetch(img.url)
+                  if (!res.ok) {
+                    logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
+                    continue
+                  }
                   const mimeType = res.headers.get('content-type') || 'image/jpeg'
                   const buffer = Buffer.from(await res.arrayBuffer())
-                  const base64 = buffer.toString('base64')
-                  const { ref } = visionService.saveImageFromBuffer(buffer, mimeType, img.ref, { url: img.url })
-                  contents.push({
-                    type: 'image',
-                    image: base64,
-                    mimeType,
-                    ref
-                  })
-                } else {
-                  logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
+                  const saved = visionService.saveImageFromBuffer(buffer, mimeType, img.ref, { url: img.url })
+                  cached = {
+                    base64: buffer.toString('base64'),
+                    mimeType: saved.mimeType
+                  }
                 }
+                contents.push({
+                  type: 'image',
+                  image: cached.base64,
+                  mimeType: cached.mimeType,
+                  ref: img.ref
+                })
               } catch (err) {
                 logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
               }

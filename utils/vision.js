@@ -75,11 +75,12 @@ class VisionService {
 
     this.rememberImageSource(ref, {
       ...source,
+      imageId: md5,
       mimeType: normalizedMimeType,
       filePath
     })
 
-    return { ref, mimeType: normalizedMimeType, ext, filePath }
+    return { ref, imageId: md5, mimeType: normalizedMimeType, ext, filePath }
   }
 
   /**
@@ -230,6 +231,16 @@ class VisionService {
     return false
   }
 
+  getImageContentId (ref) {
+    for (const ext of ['.jpg', '.png', '.gif', '.webp']) {
+      const filePath = path.join(IMAGES_DIR, `${ref}${ext}`)
+      if (fs.existsSync(filePath)) {
+        return crypto.createHash('md5').update(fs.readFileSync(filePath)).digest('hex')
+      }
+    }
+    return ''
+  }
+
   resolveImageRef (ref) {
     if (!ref) return null
     const cached = this.refs[ref] || {}
@@ -238,6 +249,7 @@ class VisionService {
     return {
       ref,
       url: cached.url || '',
+      imageId: cached.imageId || '',
       mimeType: cached.mimeType || image?.mimeType || '',
       filePath: cached.filePath || image?.filePath || ''
     }

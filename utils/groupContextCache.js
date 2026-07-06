@@ -130,8 +130,13 @@ function isImageLikeElem (elem) {
   return ['image', 'mface', 'bface', 'sface', 'marketface'].includes(elem?.type)
 }
 
-function imageRefText (ref) {
-  return `[\u56fe\u7247 ref:${ref}]`
+function shortHash (value) {
+  if (!value) return ''
+  return crypto.createHash('md5').update(String(value)).digest('hex').slice(0, 12)
+}
+
+function imageRefText (image) {
+  return `[\u56fe\u7247 ref:${image.ref}${image.imageId ? ` imageId:${image.imageId}` : ''}]`
 }
 
 function hasImageRefText (message) {
@@ -154,6 +159,33 @@ function stableImageRef (chat, elem, index) {
   return crypto.createHash('md5').update(key).digest('hex')
 }
 
+function extractImageFingerprint (elem, url) {
+  if (!elem || typeof elem !== 'object') return shortHash(url)
+  const data = elem.data || {}
+  const candidates = [
+    elem.md5,
+    elem.hash,
+    elem.fileMd5,
+    elem.file_md5,
+    elem.file,
+    elem.file_id,
+    elem.fileId,
+    elem.fid,
+    elem.uuid,
+    data.md5,
+    data.hash,
+    data.fileMd5,
+    data.file_md5,
+    data.file,
+    data.file_id,
+    data.fileId,
+    data.fid,
+    data.uuid,
+    url
+  ].filter(Boolean)
+  return shortHash(candidates[0])
+}
+
 async function buildImageInfos (chat, options = {}) {
   const images = []
   if (!Array.isArray(chat.message)) {
@@ -173,12 +205,17 @@ async function buildImageInfos (chat, options = {}) {
     }
 
     const ref = stableImageRef(chat, elem, i)
+    let imageId = extractImageFingerprint(elem, url)
     try {
-      visionService.rememberImageSource(ref, { url })
-      if (options.cacheImage && !visionService.hasImage(ref)) {
-        await visionService.saveImage(url, 'image/jpeg', ref)
+      const cachedImageId = visionService.getImageContentId(ref)
+      if (cachedImageId) {
+        imageId = cachedImageId
+      } else if (options.cacheImage) {
+        const saved = await visionService.saveImage(url, 'image/jpeg', ref)
+        imageId = saved.imageId || imageId
       }
-      images.push({ ref, url })
+      visionService.rememberImageSource(ref, { url, imageId })
+      images.push({ ref, url, imageId })
     } catch (err) {
       logger.warn(`[GroupContext] failed to save history image ref from ${url}: ${err.message}`)
     }
@@ -199,9 +236,9 @@ export async function formatChatMessage (chat, templates, options = {}) {
   const sender = chat.sender || {}
   const id = getMessageId(chat)
   let rawMessage = chat.raw_message || '-'
-  const images = await buildImageInfos(chat, { cacheImage: !options.includeImages })
+  const images = await buildImageInfos(chat, { cacheImage: true })
   if (images.length > 0) {
-    rawMessage = `${rawMessage} ${images.map(image => imageRefText(image.ref)).join(' ')}`
+    rawMessage = `${rawMessage} ${images.map(imageRefText).join(' ')}`
   }
 
   const text = templates.groupContextTemplateMessage
