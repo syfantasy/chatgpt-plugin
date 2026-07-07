@@ -7,6 +7,17 @@ function imageRefText (ref) {
   return `[\u56fe\u7247 ref:${ref}]`
 }
 
+function escapeRegExp (value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getTogglePrefixRegExp (togglePrefix) {
+  if (!togglePrefix) {
+    return null
+  }
+  return new RegExp(`^#?(?:\\u56fe\\u7247)?${escapeRegExp(togglePrefix)}(?!gpt)`, 'i')
+}
+
 /**
  * 将e中的消息转换为chaite的UserMessage
  *
@@ -123,8 +134,10 @@ export async function intoUserMessage (e, options = {}) {
   }
 
   if (toggleMode === 'prefix') {
-    const regex = new RegExp(`^#?(图片)?${togglePrefix}[^gpt]`)
-    text = text.replace(regex, '')
+    const regex = getTogglePrefixRegExp(togglePrefix)
+    if (regex) {
+      text = text.replace(regex, '')
+    }
   }
   if (imageRefs.length > 0) {
     text = `${text}${text ? ' ' : ''}${imageRefs.map(imageRefText).join(' ')}`
@@ -188,8 +201,8 @@ export function checkChatMsg (e, toggleMode, togglePrefix) {
   if (toggleMode === 'at' && (e.atBot || e.isPrivate)) {
     return true
   }
-  const prefixReg = new RegExp(`^#?(图片)?${togglePrefix}[^gpt][sS]*`)
-  if (toggleMode === 'prefix' && e.msg.startsWith(prefixReg)) {
+  const prefixReg = getTogglePrefixRegExp(togglePrefix)
+  if (toggleMode === 'prefix' && prefixReg?.test(e.msg || '')) {
     return true
   }
   return false
