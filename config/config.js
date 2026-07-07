@@ -159,7 +159,8 @@ class ChatGPTConfig {
    *   cloudApiKey: string,
    *   authKey: string,
    *   host: string,
-   *   port: number}}
+   *   port: number,
+   *   publicBaseUrl: string}}
    */
   chaite = {
     // 数据目录，相对于插件下
@@ -180,6 +181,8 @@ class ChatGPTConfig {
     host: '0.0.0.0',
     // 管理面板监听端口
     port: 48370,
+    // 管理面板外部访问地址，留空则自动从本机网卡获取IP并拼接port；NAT/反代场景可填完整地址，如 https://example.com
+    publicBaseUrl: '',
     // 存储实现 sqlite lowdb
     storage: 'sqlite'
   }

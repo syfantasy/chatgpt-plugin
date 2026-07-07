@@ -79,6 +79,7 @@ chaite:
   cloudApiKey: ""           # 可选，接入 Chaite Cloud
   host: "0.0.0.0"
   port: 48370
+  publicBaseUrl: ""         # 可选，公网/NAT/反代访问地址，如 https://example.com
 memory:
   group:
     enable: false
@@ -90,7 +91,7 @@ memory:
 
 - **basic**：控制触发方式、调试与命令前缀。
 - **llm**：定义默认模型、嵌入模型、群上下文等。`defaultChatPresetId` 需在面板或命令中提前创建。
-- **chaite**：`storage` 默认 SQLite，会在 `plugins/chatgpt-plugin/data/data.db` 生成数据文件；如接入 Chaite Cloud，请填入 `cloudApiKey` 并开放 `host/port`。
+- **chaite**：`storage` 默认 SQLite，会在 `plugins/chatgpt-plugin/data/data.db` 生成数据文件；如接入 Chaite Cloud，请填入 `cloudApiKey` 并开放 `host/port`。`publicBaseUrl` 留空时会自动使用本机网卡 IP 与 `port` 生成面板访问地址；公网、NAT 或反代场景可填完整外部地址。
 - **bym**：配置伪人触发概率、关键词映射、撤回与思考内容开关。
 - **memory**：为群记忆或私人记忆开启检索、模型与提示词，可按需启用 `extensions.simple` 以加载自定义词典。
 
@@ -106,7 +107,7 @@ memory:
 
 ### 管理命令 & 面板
 
-- `#chatgpt管理面板`：生成一次性 token，访问 `http://<host>:<port>` 即可使用 Chaite Web 面板。
+- `#chatgpt管理面板`：私聊发送一次性 token、面板地址和自动登录链接，优先打开自动登录链接；公网、NAT 或反代场景请配置 `chaite.publicBaseUrl`。
 - CRUD 命令示例（均支持 `列表 / 添加 / 查看 / 删除`）：
   ```
   #chatgpt渠道列表

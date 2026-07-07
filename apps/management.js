@@ -2,6 +2,7 @@ import ChatGPTConfig from '../config/config.js'
 import { createCRUDCommandRules, createSwitchCommandRules } from '../utils/command.js'
 import { Chaite, VERSION } from 'chaite'
 import * as crypto from 'node:crypto'
+import * as os from 'node:os'
 import common from '../../../lib/common/common.js'
 
 export class ChatGPTManagement extends plugin {
@@ -69,11 +70,28 @@ export class ChatGPTManagement extends plugin {
     ])
   }
 
-  managementPanel (e) {
-    // todo
-    // this.reply(`(todo)管理面板地址：http://${ChatGPTConfig.chaite.host}:${ChatGPTConfig.chaite.host}`)
+  async managementPanel (e) {
     const token = Chaite.getInstance().getFrontendAuthHandler().generateToken(300)
-    this.reply(`token: ${token}, 有效期300秒`, true)
+    const panelUrl = getManagementPanelBaseUrl()
+    const loginUrl = joinUrl(panelUrl, `/api/chatgpt-plugin/autologin/${encodeURIComponent(token)}`)
+    const msg = [
+      'ChatGPT 管理面板登录信息：',
+      `自动登录链接：${loginUrl}`,
+      `面板地址：${panelUrl}`,
+      `token：${token}`,
+      '有效期：300秒',
+      '',
+      '优先打开自动登录链接；如果无法自动登录，请打开面板地址并粘贴 token。'
+    ].join('\n')
+
+    const sentPrivate = await replyPrivate(e, msg)
+    if (e.isGroup) {
+      if (sentPrivate) {
+        await e.reply('管理面板登录信息已通过私聊发送，请注意查收', true)
+      } else {
+        await e.reply('管理面板登录信息生成成功，但私聊发送失败，请先添加机器人好友或私聊机器人后重试', true)
+      }
+    }
   }
 
   async setDefaultBymPreset (e) {
@@ -169,4 +187,80 @@ export class ChatGPTManagement extends plugin {
     const m = await common.makeForwardMsg(e, msgs, e.msg)
     e.reply(m)
   }
+}
+
+function getManagementPanelBaseUrl () {
+  const publicBaseUrl = String(ChatGPTConfig.chaite.publicBaseUrl || '').trim()
+  if (publicBaseUrl) {
+    return publicBaseUrl.replace(/\/+$/, '')
+  }
+
+  const port = ChatGPTConfig.chaite.port
+  const host = getReachableHost(ChatGPTConfig.chaite.host)
+  return `http://${formatHost(host)}:${port}`
+}
+
+function getReachableHost (host) {
+  const normalizedHost = String(host || '').trim()
+  if (normalizedHost && !['0.0.0.0', '::', '::0'].includes(normalizedHost)) {
+    return normalizedHost
+  }
+  return getLocalIPv4() || '127.0.0.1'
+}
+
+function getLocalIPv4 () {
+  const candidates = []
+  const interfaces = os.networkInterfaces()
+  for (const addresses of Object.values(interfaces)) {
+    for (const address of addresses || []) {
+      if (address.family === 'IPv4' && !address.internal && !address.address.startsWith('169.254.')) {
+        candidates.push(address.address)
+      }
+    }
+  }
+  return candidates.find(isPrivateIPv4) || candidates[0] || ''
+}
+
+function isPrivateIPv4 (ip) {
+  if (ip.startsWith('10.') || ip.startsWith('192.168.')) {
+    return true
+  }
+  const match = ip.match(/^172\.(\d+)\./)
+  return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31)
+}
+
+function formatHost (host) {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+}
+
+function joinUrl (baseUrl, path) {
+  return `${baseUrl.replace(/\/+$/, '')}${path}`
+}
+
+async function replyPrivate (e, msg) {
+  if (!e.isGroup) {
+    await e.reply(msg)
+    return true
+  }
+
+  const userId = e.sender?.user_id || e.user_id
+  if (!userId) {
+    return false
+  }
+
+  try {
+    const bot = e.bot || globalThis.Bot
+    const user = bot?.pickUser?.(userId) || bot?.pickFriend?.(userId)
+    if (user?.sendMsg) {
+      await user.sendMsg(msg)
+      return true
+    }
+    if (e.friend?.sendMsg) {
+      await e.friend.sendMsg(msg)
+      return true
+    }
+  } catch (error) {
+    logger?.warn?.('Failed to send management panel login info privately:', error)
+  }
+  return false
 }

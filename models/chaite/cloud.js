@@ -188,8 +188,101 @@ export async function initChaite () {
   chaite.getGlobalConfig().setDebug(ChatGPTConfig.basic.debug)
   logger.info('Chaite.RAGManager 初始化完成')
   chaite.runApiServer(app => {
+    registerManagementPanelAutoLogin(app)
     app.use('/api/memory', authenticateMemoryRequest, MemoryRouter)
   })
+}
+
+function registerManagementPanelAutoLogin (app) {
+  app.get('/api/chatgpt-plugin/autologin/:token', (req, res) => {
+    res
+      .status(200)
+      .type('html')
+      .send(renderAutoLoginHtml(req.params.token))
+  })
+}
+
+function renderAutoLoginHtml (token) {
+  const tokenJson = JSON.stringify(token).replace(/</g, '\\u003c')
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatGPT 管理面板登录中</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      color: #1f2937;
+      background: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(420px, calc(100vw - 32px));
+      padding: 28px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      box-shadow: 0 18px 45px rgb(15 23 42 / 8%);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      font-weight: 650;
+    }
+    p {
+      margin: 0;
+      color: #64748b;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>正在登录管理面板</h1>
+    <p id="message">请稍候，正在校验一次性 token。</p>
+  </main>
+  <script>
+    const token = ${tokenJson};
+    const message = document.getElementById('message');
+
+    function setLocalStorage(key, value, expire = 60 * 60 * 24 * 7) {
+      window.localStorage.setItem(key, JSON.stringify({
+        value,
+        expire: Date.now() + expire * 1000
+      }));
+    }
+
+    async function login() {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      const result = await response.json();
+      const data = result && result.data;
+      if (!response.ok || result.code !== 0 || !data || !data.token) {
+        throw new Error(result.message || 'token 无效或已过期');
+      }
+      setLocalStorage('userInfo', data);
+      setLocalStorage('accessToken', data.token);
+      if (data.refreshToken) {
+        setLocalStorage('refreshToken', data.refreshToken);
+      }
+      message.textContent = '登录成功，正在进入面板。';
+      window.location.replace('/');
+    }
+
+    login().catch(error => {
+      message.textContent = '自动登录失败：' + error.message + '。请返回私聊消息，使用面板地址和 token 手动登录。';
+    });
+  </script>
+</body>
+</html>`
 }
 
 function deepMerge (target, source) {
