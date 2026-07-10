@@ -227,13 +227,14 @@ function getInternalPanelBaseUrlEntries () {
 async function getExternalPanelBaseUrlEntries () {
   const port = ChatGPTConfig.chaite.port
   const [ipv4, ipv6] = await Promise.all([
-    fetchPublicIP([
+    fetchPublicIP('IPv4', [
       'https://api-ipv4.ip.sb/ip',
-      'https://v4.ip.me'
+      'https://api.ipify.org',
+      'https://ip.me'
     ]),
-    fetchPublicIP([
+    fetchPublicIP('IPv6', [
       'https://api-ipv6.ip.sb/ip',
-      'https://v6.ip.me'
+      'https://api64.ipify.org'
     ])
   ])
   return uniqueUrlEntries([
@@ -271,12 +272,12 @@ function getLocalNetworkAddressEntries () {
   })
 }
 
-async function fetchPublicIP (urls) {
+async function fetchPublicIP (family, urls) {
   for (const url of urls) {
     let timeout
     try {
       const controller = new AbortController()
-      timeout = setTimeout(() => controller.abort(), 3000)
+      timeout = setTimeout(() => controller.abort(), 5000)
       const response = await fetch(url, {
         signal: controller.signal,
         headers: {
@@ -288,11 +289,11 @@ async function fetchPublicIP (urls) {
         continue
       }
       const text = (await response.text()).trim()
-      if (isIPLiteral(text)) {
+      if (isIPLiteral(text, family)) {
         return text
       }
     } catch (error) {
-      logger?.debug?.(`Failed to fetch public IP from ${url}:`, error)
+      logger?.debug?.(`[ManagementPanel] public ${family} lookup failed: ${url} (${error?.code || error?.type || error?.name || error?.message || 'unknown'})`)
     } finally {
       if (timeout) {
         clearTimeout(timeout)
@@ -302,7 +303,13 @@ async function fetchPublicIP (urls) {
   return ''
 }
 
-function isIPLiteral (value) {
+function isIPLiteral (value, family) {
+  if (family === 'IPv4') {
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(value)
+  }
+  if (family === 'IPv6') {
+    return value.includes(':') && /^[0-9a-f:]+$/i.test(value)
+  }
   return /^(\d{1,3}\.){3}\d{1,3}$/.test(value) || /^[0-9a-f:]+$/i.test(value)
 }
 
