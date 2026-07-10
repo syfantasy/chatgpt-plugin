@@ -228,6 +228,7 @@ async function getExternalPanelBaseUrlEntries () {
   const port = ChatGPTConfig.chaite.port
   const [ipv4, ipv6] = await Promise.all([
     fetchPublicIP('IPv4', [
+      'https://api.live.bilibili.com/xlive/web-room/v1/index/getIpInfo',
       'https://api-ipv4.ip.sb/ip',
       'https://api.ipify.org',
       'https://ip.me'
@@ -289,8 +290,9 @@ async function fetchPublicIP (family, urls) {
         continue
       }
       const text = (await response.text()).trim()
-      if (isIPLiteral(text, family)) {
-        return text
+      const ip = parsePublicIPResponse(text)
+      if (isIPLiteral(ip, family)) {
+        return ip
       }
     } catch (error) {
       logger?.debug?.(`[ManagementPanel] public ${family} lookup failed: ${url} (${error?.code || error?.type || error?.name || error?.message || 'unknown'})`)
@@ -301,6 +303,18 @@ async function fetchPublicIP (family, urls) {
     }
   }
   return ''
+}
+
+function parsePublicIPResponse (text) {
+  if (isIPLiteral(text)) {
+    return text
+  }
+  try {
+    const data = JSON.parse(text)
+    return String(data?.data?.addr || data?.ip || data?.addr || '').trim()
+  } catch {
+    return ''
+  }
 }
 
 function isIPLiteral (value, family) {
