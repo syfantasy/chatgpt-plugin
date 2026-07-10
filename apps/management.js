@@ -3,6 +3,7 @@ import { createCRUDCommandRules, createSwitchCommandRules } from '../utils/comma
 import { Chaite, VERSION } from 'chaite'
 import * as crypto from 'node:crypto'
 import * as os from 'node:os'
+import fetch from 'node-fetch'
 import common from '../../../lib/common/common.js'
 
 export class ChatGPTManagement extends plugin {
@@ -72,25 +73,20 @@ export class ChatGPTManagement extends plugin {
 
   async managementPanel (e) {
     const token = Chaite.getInstance().getFrontendAuthHandler().generateToken(300)
-    const panelUrls = getManagementPanelBaseUrlEntries()
     const loginPath = `/api/chatgpt-plugin/autologin/${encodeURIComponent(token)}`
-    const urlLines = panelUrls.map((entry, index) => [
-      `${index + 1}. ${entry.label}`,
-      `   面板地址：${entry.url}`,
-      `   自动登录：${joinUrl(entry.url, loginPath)}`
-    ].join('\n'))
-    const msg = [
-      'ChatGPT 管理面板登录信息：',
-      '候选地址如下（不自动筛选，全部发出）：',
-      ...urlLines,
-      `token：${token}`,
-      '有效期：300秒',
-      '',
-      '以上自动登录链接共用同一个一次性 token，打开其中任意一个能访问的地址即可。',
-      '如果无法自动登录，请打开对应面板地址并粘贴 token。'
-    ].join('\n')
+    const messages = [
+      '管理面板登录入口已生成。\n请从下面几类地址里选择当前环境能打开的一项。',
+      formatPanelAddressMessage('自定义地址', getCustomPanelBaseUrlEntries(), loginPath, '没有配置自定义访问地址。'),
+      formatPanelAddressMessage('内网地址', getInternalPanelBaseUrlEntries(), loginPath, '没有读取到本机网卡地址。'),
+      formatPanelAddressMessage('外网地址', await getExternalPanelBaseUrlEntries(), loginPath, '暂时没有获取到公网 IPv4/IPv6。'),
+      [
+        `临时 token：${token}`,
+        '一次性登录链接 300 秒内有效，打开成功后该临时 token 会立即失效。',
+        '如果自动登录失败，请打开对应的面板地址后手动粘贴 token。'
+      ].join('\n')
+    ]
 
-    const sentPrivate = await replyPrivate(e, msg)
+    const sentPrivate = await replyPrivateForward(e, messages, '管理面板登录入口')
     if (e.isGroup) {
       if (sentPrivate) {
         await e.reply('管理面板登录信息已通过私聊发送，请注意查收', true)
@@ -195,16 +191,15 @@ export class ChatGPTManagement extends plugin {
   }
 }
 
-function getManagementPanelBaseUrlEntries () {
-  const entries = []
+function getCustomPanelBaseUrlEntries () {
   const publicBaseUrl = String(ChatGPTConfig.chaite.publicBaseUrl || '').trim()
-  if (publicBaseUrl) {
-    entries.push({
-      label: '配置的外部访问地址',
-      url: publicBaseUrl.replace(/\/+$/, '')
-    })
-  }
+  return publicBaseUrl
+    ? [{ label: '配置项 publicBaseUrl', url: normalizeBaseUrl(publicBaseUrl) }]
+    : []
+}
 
+function getInternalPanelBaseUrlEntries () {
+  const entries = []
   const port = ChatGPTConfig.chaite.port
   const normalizedHost = String(ChatGPTConfig.chaite.host || '').trim()
   if (normalizedHost && !['0.0.0.0', '::', '::0'].includes(normalizedHost)) {
@@ -214,7 +209,7 @@ function getManagementPanelBaseUrlEntries () {
     })
   }
 
-  getLocalIPv4Entries().forEach(entry => {
+  getLocalNetworkAddressEntries().forEach(entry => {
     entries.push({
       label: `网卡 ${entry.name}`,
       url: `http://${formatHost(entry.address)}:${port}`
@@ -229,15 +224,34 @@ function getManagementPanelBaseUrlEntries () {
   return uniqueUrlEntries(entries)
 }
 
-function getLocalIPv4Entries () {
+async function getExternalPanelBaseUrlEntries () {
+  const port = ChatGPTConfig.chaite.port
+  const [ipv4, ipv6] = await Promise.all([
+    fetchPublicIP([
+      'https://api-ipv4.ip.sb/ip',
+      'https://v4.ip.me'
+    ]),
+    fetchPublicIP([
+      'https://api-ipv6.ip.sb/ip',
+      'https://v6.ip.me'
+    ])
+  ])
+  return uniqueUrlEntries([
+    ipv4 ? { label: '公网 IPv4', url: `http://${formatHost(ipv4)}:${port}` } : null,
+    ipv6 ? { label: '公网 IPv6', url: `http://${formatHost(ipv6)}:${port}` } : null
+  ].filter(Boolean))
+}
+
+function getLocalNetworkAddressEntries () {
   const candidates = []
   const interfaces = os.networkInterfaces()
   for (const [name, addresses] of Object.entries(interfaces)) {
     for (const address of addresses || []) {
-      if (address.family === 'IPv4') {
+      if (address.family === 'IPv4' || address.family === 'IPv6') {
         candidates.push({
           name,
           address: address.address,
+          family: address.family,
           internal: address.internal
         })
       }
@@ -247,11 +261,49 @@ function getLocalIPv4Entries () {
     if (left.internal !== right.internal) {
       return left.internal ? 1 : -1
     }
+    if (left.family !== right.family) {
+      return left.family === 'IPv4' ? -1 : 1
+    }
     if (isPrivateIPv4(left.address) !== isPrivateIPv4(right.address)) {
       return isPrivateIPv4(left.address) ? -1 : 1
     }
     return left.address.localeCompare(right.address)
   })
+}
+
+async function fetchPublicIP (urls) {
+  for (const url of urls) {
+    let timeout
+    try {
+      const controller = new AbortController()
+      timeout = setTimeout(() => controller.abort(), 3000)
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'user-agent': 'chatgpt-plugin'
+        }
+      })
+      clearTimeout(timeout)
+      if (!response.ok) {
+        continue
+      }
+      const text = (await response.text()).trim()
+      if (isIPLiteral(text)) {
+        return text
+      }
+    } catch (error) {
+      logger?.debug?.(`Failed to fetch public IP from ${url}:`, error)
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+    }
+  }
+  return ''
+}
+
+function isIPLiteral (value) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(value) || /^[0-9a-f:]+$/i.test(value)
 }
 
 function isPrivateIPv4 (ip) {
@@ -263,11 +315,28 @@ function isPrivateIPv4 (ip) {
 }
 
 function formatHost (host) {
-  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+  const safeHost = host.replace(/%/g, '%25')
+  return safeHost.includes(':') && !safeHost.startsWith('[') ? `[${safeHost}]` : safeHost
 }
 
 function joinUrl (baseUrl, path) {
   return `${baseUrl.replace(/\/+$/, '')}${path}`
+}
+
+function normalizeBaseUrl (url) {
+  return url.replace(/\/+$/, '')
+}
+
+function formatPanelAddressMessage (title, entries, loginPath, emptyText) {
+  const lines = [`${title}：`]
+  if (entries.length === 0) {
+    lines.push(emptyText)
+  } else {
+    entries.forEach(entry => {
+      lines.push(`${entry.label}：${joinUrl(entry.url, loginPath)}`)
+    })
+  }
+  return lines.join('\n')
 }
 
 function uniqueUrlEntries (entries) {
@@ -281,9 +350,10 @@ function uniqueUrlEntries (entries) {
   })
 }
 
-async function replyPrivate (e, msg) {
+async function replyPrivateForward (e, messages, title) {
+  const forwardMsg = await makePrivateForwardMsg(e, messages, title)
   if (!e.isGroup) {
-    await e.reply(msg)
+    await e.reply(forwardMsg)
     return true
   }
 
@@ -296,15 +366,45 @@ async function replyPrivate (e, msg) {
     const bot = e.bot || globalThis.Bot
     const user = bot?.pickUser?.(userId) || bot?.pickFriend?.(userId)
     if (user?.sendMsg) {
-      await user.sendMsg(msg)
+      await user.sendMsg(forwardMsg)
       return true
     }
     if (e.friend?.sendMsg) {
-      await e.friend.sendMsg(msg)
+      await e.friend.sendMsg(forwardMsg)
       return true
     }
   } catch (error) {
     logger?.warn?.('Failed to send management panel login info privately:', error)
   }
   return false
+}
+
+async function makePrivateForwardMsg (e, messages, title) {
+  const bot = e.bot || globalThis.Bot
+  const userId = e.sender?.user_id || e.user_id
+  const user = userId ? (bot?.pickUser?.(userId) || bot?.pickFriend?.(userId)) : null
+  const userInfo = {
+    user_id: bot?.uin || e.self_id || userId,
+    nickname: bot?.nickname || 'ChatGPT-Plugin'
+  }
+  const nodes = messages.map(message => ({
+    ...userInfo,
+    message
+  }))
+
+  try {
+    if (user?.makeForwardMsg) {
+      return await user.makeForwardMsg(nodes)
+    }
+    if (e.friend?.makeForwardMsg) {
+      return await e.friend.makeForwardMsg(nodes)
+    }
+    if (e.group?.makeForwardMsg) {
+      return await e.group.makeForwardMsg(nodes)
+    }
+    return await common.makeForwardMsg(e, messages, title)
+  } catch (error) {
+    logger?.warn?.('Failed to build management panel forward message:', error)
+    return [`${title}：`, ...messages].join('\n\n')
+  }
 }
