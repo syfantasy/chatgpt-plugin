@@ -72,16 +72,22 @@ export class ChatGPTManagement extends plugin {
 
   async managementPanel (e) {
     const token = Chaite.getInstance().getFrontendAuthHandler().generateToken(300)
-    const panelUrl = getManagementPanelBaseUrl()
-    const loginUrl = joinUrl(panelUrl, `/api/chatgpt-plugin/autologin/${encodeURIComponent(token)}`)
+    const panelUrls = getManagementPanelBaseUrlEntries()
+    const loginPath = `/api/chatgpt-plugin/autologin/${encodeURIComponent(token)}`
+    const urlLines = panelUrls.map((entry, index) => [
+      `${index + 1}. ${entry.label}`,
+      `   面板地址：${entry.url}`,
+      `   自动登录：${joinUrl(entry.url, loginPath)}`
+    ].join('\n'))
     const msg = [
       'ChatGPT 管理面板登录信息：',
-      `自动登录链接：${loginUrl}`,
-      `面板地址：${panelUrl}`,
+      '候选地址如下（不自动筛选，全部发出）：',
+      ...urlLines,
       `token：${token}`,
       '有效期：300秒',
       '',
-      '优先打开自动登录链接；如果无法自动登录，请打开面板地址并粘贴 token。'
+      '以上自动登录链接共用同一个一次性 token，打开其中任意一个能访问的地址即可。',
+      '如果无法自动登录，请打开对应面板地址并粘贴 token。'
     ].join('\n')
 
     const sentPrivate = await replyPrivate(e, msg)
@@ -189,36 +195,63 @@ export class ChatGPTManagement extends plugin {
   }
 }
 
-function getManagementPanelBaseUrl () {
+function getManagementPanelBaseUrlEntries () {
+  const entries = []
   const publicBaseUrl = String(ChatGPTConfig.chaite.publicBaseUrl || '').trim()
   if (publicBaseUrl) {
-    return publicBaseUrl.replace(/\/+$/, '')
+    entries.push({
+      label: '配置的外部访问地址',
+      url: publicBaseUrl.replace(/\/+$/, '')
+    })
   }
 
   const port = ChatGPTConfig.chaite.port
-  const host = getReachableHost(ChatGPTConfig.chaite.host)
-  return `http://${formatHost(host)}:${port}`
-}
-
-function getReachableHost (host) {
-  const normalizedHost = String(host || '').trim()
+  const normalizedHost = String(ChatGPTConfig.chaite.host || '').trim()
   if (normalizedHost && !['0.0.0.0', '::', '::0'].includes(normalizedHost)) {
-    return normalizedHost
+    entries.push({
+      label: '配置的监听地址',
+      url: `http://${formatHost(normalizedHost)}:${port}`
+    })
   }
-  return getLocalIPv4() || '127.0.0.1'
+
+  getLocalIPv4Entries().forEach(entry => {
+    entries.push({
+      label: `网卡 ${entry.name}`,
+      url: `http://${formatHost(entry.address)}:${port}`
+    })
+  })
+
+  entries.push({
+    label: '本机回环地址',
+    url: `http://127.0.0.1:${port}`
+  })
+
+  return uniqueUrlEntries(entries)
 }
 
-function getLocalIPv4 () {
+function getLocalIPv4Entries () {
   const candidates = []
   const interfaces = os.networkInterfaces()
-  for (const addresses of Object.values(interfaces)) {
+  for (const [name, addresses] of Object.entries(interfaces)) {
     for (const address of addresses || []) {
-      if (address.family === 'IPv4' && !address.internal && !address.address.startsWith('169.254.')) {
-        candidates.push(address.address)
+      if (address.family === 'IPv4') {
+        candidates.push({
+          name,
+          address: address.address,
+          internal: address.internal
+        })
       }
     }
   }
-  return candidates.find(isPrivateIPv4) || candidates[0] || ''
+  return candidates.sort((left, right) => {
+    if (left.internal !== right.internal) {
+      return left.internal ? 1 : -1
+    }
+    if (isPrivateIPv4(left.address) !== isPrivateIPv4(right.address)) {
+      return isPrivateIPv4(left.address) ? -1 : 1
+    }
+    return left.address.localeCompare(right.address)
+  })
 }
 
 function isPrivateIPv4 (ip) {
@@ -235,6 +268,17 @@ function formatHost (host) {
 
 function joinUrl (baseUrl, path) {
   return `${baseUrl.replace(/\/+$/, '')}${path}`
+}
+
+function uniqueUrlEntries (entries) {
+  const seen = new Set()
+  return entries.filter(entry => {
+    if (seen.has(entry.url)) {
+      return false
+    }
+    seen.add(entry.url)
+    return true
+  })
 }
 
 async function replyPrivate (e, msg) {
