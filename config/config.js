@@ -202,13 +202,7 @@ class ChatGPTConfig {
    *   imageDescriptionSystemPrompt: string,
    *   defaultQuestion: string,
    *   maxImageSize: number,
-   *   enableGroupContextImages: boolean,
-   *   enableGroupContextImageCompression: boolean,
-   *   groupContextImageCompressionThreshold: number,
-   *   groupContextImageCompressionStrategy: 'fixed' | 'budget',
-   *   groupContextImageCompressionScale: number,
-   *   groupContextImageCompressionQuality: number,
-   *   groupContextImageCompressionBudget: number
+   *   enableGroupContextImages: boolean
    * }}
    */
   vision = {
@@ -226,18 +220,7 @@ class ChatGPTConfig {
     // 最大处理图片大小（bytes），默认 10MB
     maxImageSize: 10485760,
     // 是否将群聊上下文中的图片也存入历史（开启后图片会进入主干对话）
-    enableGroupContextImages: true,
-    // 是否压缩进入群聊上下文的图片；原始图片保留给 ask_about_image 使用
-    enableGroupContextImageCompression: true,
-    // 仅固定压缩策略下，原图达到该体积才压缩（默认 512 KiB）
-    groupContextImageCompressionThreshold: 524288,
-    // fixed：按固定比例处理；budget：本轮群聊上下文图片总量尽量不超过预算
-    groupContextImageCompressionStrategy: 'budget',
-    // 缩放后的边长比例（百分比）和 JPEG 质量
-    groupContextImageCompressionScale: 70,
-    groupContextImageCompressionQuality: 75,
-    // budget 策略的单轮上下文图片总预算（默认 3 MiB）
-    groupContextImageCompressionBudget: 3145728
+    enableGroupContextImages: true
   }
 
   /**

@@ -6,9 +6,9 @@ import { getGroupContextPrompt, buildGroupContextMessages, getGroupHistory } fro
 import { formatTimeToBeiJing } from '../utils/common.js'
 import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
 import { buildMemoryPrompt } from '../models/memory/prompt.js'
-import { isVisualModelForSendOptions } from '../utils/vision.js'
-import { prepareGroupContextImages } from '../utils/groupContextImages.js'
+import { isVisualModelForSendOptions, visionService } from '../utils/vision.js'
 import * as crypto from 'node:crypto'
+import fetch from 'node-fetch'
 
 function getEventUserId (e) {
   const userId = e?.user_id ?? e?.sender?.user_id
@@ -140,9 +140,6 @@ export class bym extends plugin {
         { includeImages: includeGroupContextImages }
       )
       if (groupContext?.messages.length) {
-        const preparedImages = includeGroupContextImages
-          ? await prepareGroupContextImages(groupContext.messages.flatMap(message => message.images || []), ChatGPTConfig.vision)
-          : new Map()
         const pendingHistoryMessages = []
         // 群聊 header 作为第一条
         if (groupContext.header) {
@@ -160,8 +157,23 @@ export class bym extends plugin {
           const contents = [{ type: 'text', text: m.text }]
           if (m.images && m.images.length > 0 && includeGroupContextImages) {
             for (const img of m.images) {
-              const prepared = preparedImages.get(img.ref)
-              if (prepared) contents.push(prepared)
+              try {
+                let cached = visionService.loadImage(img.ref)
+                if (!cached) {
+                  const res = await fetch(img.url)
+                  if (!res.ok) {
+                    logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
+                    continue
+                  }
+                  const mimeType = res.headers.get('content-type') || 'image/jpeg'
+                  const buffer = Buffer.from(await res.arrayBuffer())
+                  const saved = visionService.saveImageFromBuffer(buffer, mimeType, img.ref, { url: img.url })
+                  cached = { base64: buffer.toString('base64'), mimeType: saved.mimeType }
+                }
+                contents.push({ type: 'image', image: cached.base64, mimeType: cached.mimeType, ref: img.ref })
+              } catch (err) {
+                logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
+              }
             }
           }
           const msg = {
