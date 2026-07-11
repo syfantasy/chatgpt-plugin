@@ -8,6 +8,7 @@ import {
   ToolManager,
   ToolsGroupManager,
   TriggerManager
+  , OperationLogManager
 } from 'chaite'
 import ChatGPTConfig from '../../config/config.js'
 import { LowDBChannelStorage } from './storage/lowdb/channel_storage.js'
@@ -34,6 +35,7 @@ import SQLiteTriggerStorage from './storage/sqlite/trigger_storage.js'
 import LowDBTriggerStorage from './storage/lowdb/trigger_storage,.js'
 import { createChaiteVectorizer } from './vectorizer.js'
 import { MemoryRouter, authenticateMemoryRequest } from '../memory/router.js'
+import { SQLiteOperationLogStorage } from './storage/sqlite/operation_log_storage.js'
 
 /**
  * 认证，以便共享上传
@@ -128,6 +130,11 @@ export async function initChaite () {
   const userModeSelector = new ChatGPTUserModeSelector()
   let chaite = Chaite.init(channelsManager, toolsManager, processorsManager, chatPresetManager, toolsGroupManager, triggerManager,
     userModeSelector, userStateStorage, historyStorage, logger)
+  if (storage === 'sqlite') {
+    const operationLogStorage = new SQLiteOperationLogStorage(path.join(dataDir, 'data.db'))
+    await operationLogStorage.initialize()
+    chaite.setOperationLogManager(new OperationLogManager(operationLogStorage))
+  }
   logger.info('Chaite 初始化完成')
   chaite.setCloudService(ChatGPTConfig.chaite.cloudBaseUrl)
   logger.info('Chaite.Cloud 初始化完成')

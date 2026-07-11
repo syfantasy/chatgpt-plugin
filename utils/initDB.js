@@ -49,19 +49,72 @@ async function addEmbeddedProcessor (resourcesDir, processorsManager, type, name
   }))
 }
 
+const blackPreProcessorId = md5('BlackPreProcessor')
+const blackPostProcessorId = md5('BlackPostProcessor')
+
+/**
+ * The original v3 bootstrap accidentally registered BlackPre/Post with
+ * inverted DTO types. Keep this repair idempotent so existing installations
+ * self-heal on upgrade without touching user-created processors.
+ */
+async function repairBlackProcessors (resourcesDir, processorsManager) {
+  const definitions = [
+    { id: blackPreProcessorId, name: 'BlackPreProcessor', type: 'pre', description: '内置用户消息屏蔽词前处理器' },
+    { id: blackPostProcessorId, name: 'BlackPostProcessor', type: 'post', description: '内置机器人回复屏蔽词后处理器' }
+  ]
+
+  for (const definition of definitions) {
+    const code = readEmbeddedCode(resourcesDir, definition.name)
+    const existing = await processorsManager.getInstanceT(definition.id)
+    if (!existing || existing.type !== definition.type || existing.code !== code || !existing.embedded) {
+      await processorsManager.addInstance(new ProcessorDTO({
+        ...existing,
+        ...definition,
+        code,
+        embedded: true,
+        uploader: existing?.uploader || systemUser
+      }))
+      logger.info(`修复内置处理器 ${definition.name} (${definition.type})`)
+    }
+  }
+}
+
+/** Move only the historical inverted Black IDs; never add filters to channels that never used them. */
+async function repairBlackProcessorBindings (channelsManager) {
+  const channels = await channelsManager.listInstances()
+  let repaired = 0
+  const unique = values => [...new Set(values)]
+
+  for (const channel of channels) {
+    const options = channel.options
+    if (!options) continue
+    const pre = [...(options.preProcessorIds || [])]
+    const post = [...(options.postProcessorIds || [])]
+    const hasInvertedPre = pre.includes(blackPostProcessorId)
+    const hasInvertedPost = post.includes(blackPreProcessorId)
+    if (!hasInvertedPre && !hasInvertedPost) continue
+
+    options.preProcessorIds = unique([
+      ...pre.filter(id => id !== blackPostProcessorId),
+      ...(hasInvertedPost ? [blackPreProcessorId] : [])
+    ])
+    options.postProcessorIds = unique([
+      ...post.filter(id => id !== blackPreProcessorId),
+      ...(hasInvertedPre ? [blackPostProcessorId] : [])
+    ])
+    await channelsManager.upsertInstance(channel)
+    repaired++
+  }
+
+  if (repaired) logger.info(`已修复 ${repaired} 个渠道的 Black 前后处理器挂载关系`)
+}
+
 export async function migrateDatabase () {
   logger.debug('检查数据库初始化...')
   const resourcesDir = path.resolve('./plugins/chatgpt-plugin', 'resources/embedded')
-  // 1. 设置初始化的预处理器
+  // 1. 修复并设置内置处理器
   const processorsManager = Chaite.getInstance().getProcessorsManager()
-  if (!await processorsManager.getInstance('BlackPostProcessor')) {
-    logger.info('初始化内置的屏蔽词前置处理器')
-    await addEmbeddedProcessor(resourcesDir, processorsManager, 'pre', 'BlackPostProcessor', '内置的屏蔽词前置处理器')
-  }
-  if (!await processorsManager.getInstance('BlackPreProcessor')) {
-    logger.info('初始化内置的屏蔽词后置处理器')
-    await addEmbeddedProcessor(resourcesDir, processorsManager, 'post', 'BlackPreProcessor', '内置的屏蔽词前置处理器')
-  }
+  await repairBlackProcessors(resourcesDir, processorsManager)
   // 注册内置的图片引用预处理器
   const imageRefProcessorId = md5('ImageRefPreProcessor')
   const imageRefProcessorCode = readEmbeddedCode(resourcesDir, 'ImageRefPreProcessor')
@@ -81,6 +134,7 @@ export async function migrateDatabase () {
   }
   // 2. 设置默认渠道
   const channelsManager = Chaite.getInstance().getChannelsManager()
+  await repairBlackProcessorBindings(channelsManager)
   try {
     await channelsManager.getChannelByModel('Qwen/Qwen2.5-7B-Instruct')
   } catch (err) {
@@ -98,8 +152,8 @@ export async function migrateDatabase () {
           features: ['tool', 'chat'],
           baseUrl: 'https://oneapi.ikechan8370.com/v1',
           apiKey: 'sk-uIzofH2TIMVu6giK56BeCeD5E98b42EbBe695597B5FeAc68',
-          preProcessorIds: [imageRefProcessorId],
-          postProcessorIds: [md5('BlackPreProcessor'), md5('BlackPostProcessor')]
+          preProcessorIds: [imageRefProcessorId, blackPreProcessorId],
+          postProcessorIds: [blackPostProcessorId]
         }),
         uploader: systemUser
       }))
