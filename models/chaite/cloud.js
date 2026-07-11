@@ -8,7 +8,7 @@ import {
   ToolManager,
   ToolsGroupManager,
   TriggerManager
-  , OperationLogManager
+  , OperationLogManager, McpServerManager, SkillRegistry
 } from 'chaite'
 import ChatGPTConfig from '../../config/config.js'
 import { LowDBChannelStorage } from './storage/lowdb/channel_storage.js'
@@ -36,6 +36,8 @@ import LowDBTriggerStorage from './storage/lowdb/trigger_storage,.js'
 import { createChaiteVectorizer } from './vectorizer.js'
 import { MemoryRouter, authenticateMemoryRequest } from '../memory/router.js'
 import { SQLiteOperationLogStorage } from './storage/sqlite/operation_log_storage.js'
+import { SQLiteMcpServerStorage } from './storage/sqlite/mcp_server_storage.js'
+import { LowDBMcpServerStorage } from './storage/lowdb/mcp_server_storage.js'
 
 /**
  * 认证，以便共享上传
@@ -71,7 +73,7 @@ export async function initRagManager (model, dimensions) {
 
 export async function initChaite () {
   const storage = ChatGPTConfig.chaite.storage
-  let channelsStorage, chatPresetsStorage, toolsStorage, processorsStorage, userStateStorage, historyStorage, toolsGroupStorage, triggerStorage, operationLogStorage
+  let channelsStorage, chatPresetsStorage, toolsStorage, processorsStorage, userStateStorage, historyStorage, toolsGroupStorage, triggerStorage, operationLogStorage, mcpServerStorage
   switch (storage) {
     case 'sqlite': {
       const dbPath = path.join(dataDir, 'data.db')
@@ -89,6 +91,8 @@ export async function initChaite () {
       await toolsGroupStorage.initialize()
       triggerStorage = new SQLiteTriggerStorage(dbPath)
       await triggerStorage.initialize()
+      mcpServerStorage = new SQLiteMcpServerStorage(dbPath)
+      await mcpServerStorage.initialize()
       historyStorage = new SQLiteHistoryManager(dbPath, path.join(dataDir, 'images'))
       await checkMigrate()
       break
@@ -102,6 +106,7 @@ export async function initChaite () {
       processorsStorage = new LowDBProcessorsStorage(ChatGPTStorage)
       userStateStorage = new LowDBUserStateStorage(ChatGPTStorage)
       triggerStorage = new LowDBTriggerStorage(ChatGPTStorage)
+      mcpServerStorage = new LowDBMcpServerStorage(ChatGPTStorage)
       const ChatGPTHistoryStorage = (await import('storage/lowdb/storage.js')).ChatGPTHistoryStorage
       await ChatGPTHistoryStorage.init()
       historyStorage = new LowDBHistoryManager(ChatGPTHistoryStorage)
@@ -135,6 +140,13 @@ export async function initChaite () {
     await operationLogStorage.initialize()
     chaite.setOperationLogManager(new OperationLogManager(operationLogStorage))
   }
+  chaite.setMcpServerManager(new McpServerManager(mcpServerStorage))
+  chaite.setMcpManagementGuard(context => Boolean(context.getEvent()?.isMaster))
+  const skillsDir = path.join(dataDir, 'skills')
+  if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true })
+  const skillRegistry = new SkillRegistry(skillsDir)
+  await skillRegistry.load()
+  chaite.setSkillRegistry(skillRegistry)
   logger.info('Chaite 初始化完成')
   chaite.setCloudService(ChatGPTConfig.chaite.cloudBaseUrl)
   logger.info('Chaite.Cloud 初始化完成')

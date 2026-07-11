@@ -82,6 +82,7 @@ class ChatGPTConfig {
    *   blockStrategy: 'full' | 'mask',
    *   blockWordMask: string,
    *   enableGroupContext: boolean,
+   *   retainDynamicContextHistory: boolean,
    *   groupContextLength: number,
    *   groupContextTemplatePrefix: string,
    *   groupContextTemplateMessage: string,
@@ -113,6 +114,9 @@ class ChatGPTConfig {
     blockWordMask: '***',
     // 是否开启群组上下文
     enableGroupContext: false,
+    // 是否在多轮普通对话中保留每轮动态上下文（群聊记录、时间、记忆）。
+    // 关闭可显著减少 token；支持上下文缓存的渠道可改为开启。
+    retainDynamicContextHistory: false,
     // 群组上下文长度
     groupContextLength: 20,
     // 用于组装群聊上下文提示词的模板前缀
@@ -198,7 +202,13 @@ class ChatGPTConfig {
    *   imageDescriptionSystemPrompt: string,
    *   defaultQuestion: string,
    *   maxImageSize: number,
-   *   enableGroupContextImages: boolean
+   *   enableGroupContextImages: boolean,
+   *   enableGroupContextImageCompression: boolean,
+   *   groupContextImageCompressionThreshold: number,
+   *   groupContextImageCompressionStrategy: 'fixed' | 'budget',
+   *   groupContextImageCompressionScale: number,
+   *   groupContextImageCompressionQuality: number,
+   *   groupContextImageCompressionBudget: number
    * }}
    */
   vision = {
@@ -216,7 +226,18 @@ class ChatGPTConfig {
     // 最大处理图片大小（bytes），默认 10MB
     maxImageSize: 10485760,
     // 是否将群聊上下文中的图片也存入历史（开启后图片会进入主干对话）
-    enableGroupContextImages: true
+    enableGroupContextImages: true,
+    // 是否压缩进入群聊上下文的图片；原始图片保留给 ask_about_image 使用
+    enableGroupContextImageCompression: true,
+    // 仅固定压缩策略下，原图达到该体积才压缩（默认 512 KiB）
+    groupContextImageCompressionThreshold: 524288,
+    // fixed：按固定比例处理；budget：本轮群聊上下文图片总量尽量不超过预算
+    groupContextImageCompressionStrategy: 'budget',
+    // 缩放后的边长比例（百分比）和 JPEG 质量
+    groupContextImageCompressionScale: 70,
+    groupContextImageCompressionQuality: 75,
+    // budget 策略的单轮上下文图片总预算（默认 3 MiB）
+    groupContextImageCompressionBudget: 3145728
   }
 
   /**

@@ -5,9 +5,9 @@ import { YunzaiUserState } from '../models/chaite/storage/lowdb/user_state_stora
 import { getGroupContextPrompt, buildGroupContextMessages, getGroupHistory } from '../utils/group.js'
 import { buildMemoryPrompt } from '../models/memory/prompt.js'
 import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
-import { isVisualModelForSendOptions, visionService } from '../utils/vision.js'
+import { isVisualModelForSendOptions } from '../utils/vision.js'
+import { prepareGroupContextImages } from '../utils/groupContextImages.js'
 import * as crypto from 'node:crypto'
-import fetch from 'node-fetch'
 
 function getEventUserId (e) {
   const userId = e?.user_id ?? e?.sender?.user_id
@@ -80,6 +80,26 @@ export class Chat extends plugin {
     const userText = extractTextFromUserMessage(userMessage) || e.msg || ''
     sendMessageOptions.conversationId = state?.current?.conversationId
     sendMessageOptions.parentMessageId = state?.current?.messageId || state?.conversations.find(c => c.id === sendMessageOptions.conversationId)?.lastMessageId
+    const retainDynamicContextHistory = preset.dynamicContextHistory === 'retain' ||
+      (preset.dynamicContextHistory !== 'discard' && Config.llm.retainDynamicContextHistory === true)
+    if (!retainDynamicContextHistory && sendMessageOptions.parentMessageId) {
+      const historyManager = Chaite.getInstance().getHistoryManager()
+      if (typeof historyManager.removeHistory === 'function') {
+        const previousHistory = await historyManager.getHistory(
+          sendMessageOptions.parentMessageId,
+          sendMessageOptions.conversationId
+        )
+        const staleDynamicContexts = previousHistory.filter(message => message._chatgptDynamicContext === true)
+        for (const message of staleDynamicContexts) {
+          await historyManager.removeHistory(message.id, sendMessageOptions.conversationId)
+        }
+        if (staleDynamicContexts.length > 0) {
+          logger.debug(`[Chat] removed ${staleDynamicContexts.length} stale dynamic context message(s) from history`)
+        }
+      } else {
+        logger.warn('[Chat] current history storage does not support removing stale dynamic context messages')
+      }
+    }
     // systemOverride 保持静态（仅 baseSystem），动态内容移到独立 user message 中
     const baseSystem = sendMessageOptions.systemOverride || preset.sendMessageOption?.systemOverride || ''
     if (baseSystem) {
@@ -121,39 +141,19 @@ export class Chat extends plugin {
         { includeImages: includeGroupContextImages }
       )
       if (groupContext?.messages.length) {
+        const preparedImages = includeGroupContextImages
+          ? await prepareGroupContextImages(groupContext.messages.flatMap(message => message.images || []), Config.vision)
+          : new Map()
         if (groupContext.header) {
           contextSegments.push(groupContext.header)
         }
         const lines = []
         for (const m of groupContext.messages) {
           lines.push(m.text)
-          if (m.images && m.images.length > 0 && Config.vision?.enableGroupContextImages !== false) {
+          if (m.images && m.images.length > 0 && includeGroupContextImages) {
             for (const img of m.images) {
-              try {
-                let cached = visionService.loadImage(img.ref)
-                if (!cached) {
-                  const res = await fetch(img.url)
-                  if (!res.ok) {
-                    logger.warn(`[GroupContext] 获取图片失败 ${img.url}: ${res.status}`)
-                    continue
-                  }
-                  const mimeType = res.headers.get('content-type') || 'image/jpeg'
-                  const buffer = Buffer.from(await res.arrayBuffer())
-                  const saved = visionService.saveImageFromBuffer(buffer, mimeType, img.ref, { url: img.url })
-                  cached = {
-                    base64: buffer.toString('base64'),
-                    mimeType: saved.mimeType
-                  }
-                }
-                contextImages.push({
-                  type: 'image',
-                  image: cached.base64,
-                  mimeType: cached.mimeType,
-                  ref: img.ref
-                })
-              } catch (err) {
-                logger.warn(`[GroupContext] 获取图片异常 ${img.url}: ${err.message}`)
-              }
+              const prepared = preparedImages.get(img.ref)
+              if (prepared) contextImages.push(prepared)
             }
           }
         }
@@ -172,7 +172,10 @@ export class Chat extends plugin {
         id: crypto.randomUUID(),
         parentId: sendMessageOptions.parentMessageId,
         role: 'user',
-        content: contextContent
+        content: contextContent,
+        // Internal marker: allows a future turn to discard this transient
+        // group/time/memory context without removing actual conversation turns.
+        _chatgptDynamicContext: true
       }
       await Chaite.getInstance().getHistoryManager().saveHistory(contextMsg, sendMessageOptions.conversationId)
       sendMessageOptions.parentMessageId = contextMsg.id

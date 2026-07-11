@@ -1,6 +1,6 @@
 import ChatGPTConfig from '../config/config.js'
 import { createCRUDCommandRules, createSwitchCommandRules } from '../utils/command.js'
-import { Chaite, VERSION } from 'chaite'
+import { Chaite, VERSION, McpToolExecutor } from 'chaite'
 import * as crypto from 'node:crypto'
 import * as os from 'node:os'
 import fetch from 'node-fetch'
@@ -32,6 +32,11 @@ export class ChatGPTManagement extends plugin {
         {
           reg: `^${cmdPrefix}(查看)?(当前)?(配置|信息|统计信息|状态)$`,
           fnc: 'currentStatus',
+          permission: 'master'
+        },
+        {
+          reg: `^${cmdPrefix}确认MCP\s+[a-zA-Z0-9-]+$`,
+          fnc: 'confirmMcpDraft',
           permission: 'master'
         }
       ]
@@ -93,6 +98,29 @@ export class ChatGPTManagement extends plugin {
       } else {
         await e.reply('管理面板登录信息生成成功，但私聊发送失败，请先添加机器人好友或私聊机器人后重试', true)
       }
+    }
+  }
+
+  async confirmMcpDraft (e) {
+    const draftId = e.msg.trim().split(/\s+/).pop()
+    const chaite = Chaite.getInstance()
+    const config = chaite.getMcpCapabilityManager()?.takeDraft(draftId)
+    if (!config) {
+      await e.reply('没有找到可确认的 MCP 草案，草案可能已过期。')
+      return false
+    }
+    const manager = chaite.getMcpServerManager()
+    const server = await manager?.add(config)
+    try {
+      const executor = new McpToolExecutor(server)
+      const tools = await executor.listAvailableTools({ runId: 'qq-confirm', userId: String(e.user_id || e.sender?.user_id || 'master') })
+      await executor.close()
+      await manager?.update(server.id, { tools, toolsDiscoveredAt: Date.now() })
+      await e.reply(`MCP 服务“${server.name}”已保存并连接成功，发现并缓存 ${tools.length} 个工具。接下来可在面板创建关联 Skill。`)
+    } catch (error) {
+      await manager?.delete(server?.id)
+      await e.reply(`MCP 服务连接失败，未保存：${error instanceof Error ? error.message : String(error)}`)
+      return false
     }
   }
 

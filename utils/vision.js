@@ -161,8 +161,10 @@ class VisionService {
     let visionChannel
     if (config.visionChannelId) {
       visionChannel = allChannels.find(c => c.id === config.visionChannelId)
-    }
-    if (!visionChannel) {
+      if (!visionChannel) throw new Error(`Configured vision channel ${config.visionChannelId} was not found`)
+      if (visionChannel.status !== 'enabled') throw new Error(`Configured vision channel ${visionChannel.name} is disabled`)
+      if (!getVisualModel(visionChannel)) throw new Error(`Configured vision channel ${visionChannel.name} has no model with visual capability`)
+    } else {
       visionChannel = allChannels.find(
         c => c.status === 'enabled' && getVisualModel(c)
       )
@@ -173,8 +175,16 @@ class VisionService {
 
     await visionChannel.ready()
 
-    const visualModel = getVisualModel(visionChannel) || visionChannel.models?.[0]
-    const model = config.imageDescriptionModel || visualModel?.name
+    const configuredModel = config.imageDescriptionModel
+    const visualModel = configuredModel
+      ? visionChannel.models?.find(item => item.name === configuredModel && isVisualModel(item))
+      : getVisualModel(visionChannel)
+    if (!visualModel) {
+      throw new Error(configuredModel
+        ? `Configured vision model ${configuredModel} is unavailable or does not support visual on channel ${visionChannel.name}`
+        : `No visual model is available on channel ${visionChannel.name}`)
+    }
+    const model = visualModel.name
     const systemPrompt = config.imageDescriptionSystemPrompt ||
       'You are an image analysis assistant. Answer questions about images accurately and thoroughly.'
 
@@ -182,11 +192,7 @@ class VisionService {
     const context = new ChaiteContext(chaite.getLogger?.())
     context.setChaite(chaite)
 
-    const client = createClient(visionChannel.adapterType, {
-      baseUrl: visionChannel.options.baseUrl,
-      apiKey: visionChannel.options.apiKey,
-      features: ['chat', 'visual']
-    }, context)
+    const client = createClient(visionChannel.adapterType, visionChannel.getOptionsForModel(model), context)
 
     const response = await client.sendMessage({
       role: 'user',
