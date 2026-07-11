@@ -3,10 +3,11 @@ import sqlite3 from 'sqlite3'
 
 /** Durable storage for Chaite usage records. Indexed fields stay queryable by SQLite tools. */
 export class SQLiteOperationLogStorage extends ChaiteStorage {
-  constructor (dbPath) {
+  constructor (dbPath, maxEntries = 50000) {
     super()
     this.db = new sqlite3.Database(dbPath)
     this.writeCount = 0
+    this.maxEntries = this.normalizeLimit(maxEntries)
   }
 
   getName () { return 'SQLiteOperationLogStorage' }
@@ -31,7 +32,10 @@ export class SQLiteOperationLogStorage extends ChaiteStorage {
         CREATE INDEX IF NOT EXISTS idx_operation_logs_group ON operation_logs(groupId, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_operation_logs_channel ON operation_logs(channelId, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_operation_logs_type ON operation_logs(type, timestamp DESC);
-      `, err => err ? reject(err) : resolve())
+      `, err => {
+        if (err) return reject(err)
+        this.prune().then(resolve, reject)
+      })
     })
   }
 
@@ -46,9 +50,10 @@ export class SQLiteOperationLogStorage extends ChaiteStorage {
       err => {
         if (err) return reject(err)
         this.writeCount++
-        // Bound disk and query cost on small hosts. Prune in batches, not per write.
-        if (this.writeCount % 200 === 0) {
-          this.db.run('DELETE FROM operation_logs WHERE id NOT IN (SELECT id FROM operation_logs ORDER BY timestamp DESC LIMIT 50000)')
+        // Keep low-spec hosts responsive: prune in small batches, scaled to the chosen limit.
+        const pruneEvery = Math.min(200, Math.max(1, Math.floor(this.maxEntries / 10)))
+        if (this.maxEntries > 0 && this.writeCount % pruneEvery === 0) {
+          this.prune().catch(() => {})
         }
         resolve(id)
       }
@@ -57,6 +62,22 @@ export class SQLiteOperationLogStorage extends ChaiteStorage {
 
   removeItem (id) { return new Promise((resolve, reject) => this.db.run('DELETE FROM operation_logs WHERE id = ?', [id], err => err ? reject(err) : resolve())) }
   clear () { return new Promise((resolve, reject) => this.db.run('DELETE FROM operation_logs', err => err ? reject(err) : resolve())) }
+  setMaxEntries (maxEntries) {
+    this.maxEntries = this.normalizeLimit(maxEntries)
+    return this.prune()
+  }
+  normalizeLimit (value) {
+    const limit = Number.parseInt(value, 10)
+    return Number.isFinite(limit) && limit > 0 ? limit : 0
+  }
+  prune () {
+    if (this.maxEntries <= 0) return Promise.resolve()
+    return new Promise((resolve, reject) => this.db.run(
+      'DELETE FROM operation_logs WHERE id IN (SELECT id FROM operation_logs ORDER BY timestamp DESC LIMIT -1 OFFSET ?)',
+      [this.maxEntries],
+      err => err ? reject(err) : resolve()
+    ))
+  }
   listItems () { return new Promise((resolve, reject) => this.db.all('SELECT payload FROM operation_logs ORDER BY timestamp DESC', (err, rows) => err ? reject(err) : resolve(rows.map(row => JSON.parse(row.payload))))) }
   async listItemsByEqFilter (filter) { const items = await this.listItems(); return items.filter(item => Object.entries(filter).every(([key, val]) => item[key] === val)) }
   async listItemsByInQuery (query) { const items = await this.listItems(); return items.filter(item => query.every(({ field, values }) => values.includes(item[field]))) }

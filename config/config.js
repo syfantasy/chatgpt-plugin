@@ -184,7 +184,9 @@ class ChatGPTConfig {
     // 管理面板自定义访问地址；NAT/反代场景可填完整地址，如 https://example.com
     publicBaseUrl: '',
     // 存储实现 sqlite lowdb
-    storage: 'sqlite'
+    storage: 'sqlite',
+    // 操作日志最多保留的条数，设为 0 可禁用自动清理
+    operationLogLimit: 50000
   }
 
   /**

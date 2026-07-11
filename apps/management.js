@@ -205,23 +205,29 @@ function getInternalPanelBaseUrlEntries () {
   if (normalizedHost && !['0.0.0.0', '::', '::0'].includes(normalizedHost)) {
     entries.push({
       label: '配置的监听地址',
-      url: `http://${formatHost(normalizedHost)}:${port}`
+      url: `http://${formatHost(normalizedHost)}:${port}`,
+      host: normalizedHost
     })
   }
 
   getLocalNetworkAddressEntries().forEach(entry => {
     entries.push({
       label: `网卡 ${entry.name}`,
-      url: `http://${formatHost(entry.address)}:${port}`
+      url: `http://${formatHost(entry.address)}:${port}`,
+      host: entry.address
     })
   })
 
   entries.push({
     label: '本机回环地址',
-    url: `http://127.0.0.1:${port}`
+    url: `http://127.0.0.1:${port}`,
+    host: '127.0.0.1'
   })
 
-  return uniqueUrlEntries(entries)
+  const uniqueEntries = uniqueUrlEntries(entries)
+  const nonLoopbackEntries = uniqueEntries.filter(entry => !isLoopbackHost(entry.host))
+  // 回环地址只在没有任何实际可访问地址时作为本机访问的兜底。
+  return nonLoopbackEntries.length > 0 ? nonLoopbackEntries : uniqueEntries
 }
 
 async function getExternalPanelBaseUrlEntries () {
@@ -333,6 +339,14 @@ function isPrivateIPv4 (ip) {
   }
   const match = ip.match(/^172\.(\d+)\./)
   return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31)
+}
+
+function isLoopbackHost (host) {
+  const normalizedHost = String(host || '').trim().toLowerCase()
+  return normalizedHost === '127.0.0.1'
+    || normalizedHost === '::1'
+    || normalizedHost === '[::1]'
+    || normalizedHost === 'localhost'
 }
 
 function formatHost (host) {

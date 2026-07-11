@@ -71,7 +71,7 @@ export async function initRagManager (model, dimensions) {
 
 export async function initChaite () {
   const storage = ChatGPTConfig.chaite.storage
-  let channelsStorage, chatPresetsStorage, toolsStorage, processorsStorage, userStateStorage, historyStorage, toolsGroupStorage, triggerStorage
+  let channelsStorage, chatPresetsStorage, toolsStorage, processorsStorage, userStateStorage, historyStorage, toolsGroupStorage, triggerStorage, operationLogStorage
   switch (storage) {
     case 'sqlite': {
       const dbPath = path.join(dataDir, 'data.db')
@@ -131,7 +131,7 @@ export async function initChaite () {
   let chaite = Chaite.init(channelsManager, toolsManager, processorsManager, chatPresetManager, toolsGroupManager, triggerManager,
     userModeSelector, userStateStorage, historyStorage, logger)
   if (storage === 'sqlite') {
-    const operationLogStorage = new SQLiteOperationLogStorage(path.join(dataDir, 'data.db'))
+    operationLogStorage = new SQLiteOperationLogStorage(path.join(dataDir, 'data.db'), ChatGPTConfig.chaite.operationLogLimit)
     await operationLogStorage.initialize()
     chaite.setOperationLogManager(new OperationLogManager(operationLogStorage))
   }
@@ -179,6 +179,7 @@ export async function initChaite () {
       // 回传部分需要同步的配置
       chaite.getGlobalConfig().setDebug(ChatGPTConfig.basic.debug)
       chaite.getGlobalConfig().setAuthKey(ChatGPTConfig.chaite.authKey)
+      operationLogStorage?.setMaxEntries(ChatGPTConfig.chaite.operationLogLimit).catch(error => logger.warn(`更新操作日志保留条数失败: ${error.message}`))
 
       // 使用新的触发保存方法，而不是直接调用saveToFile
       ChatGPTConfig._triggerSave('chaite')
