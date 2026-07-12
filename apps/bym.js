@@ -10,6 +10,8 @@ import { isVisualModelForSendOptions, visionService } from '../utils/vision.js'
 import * as crypto from 'node:crypto'
 import fetch from 'node-fetch'
 
+const DEFAULT_CONTEXTUAL_PROMPT = '你现在不是在回复某一条特定消息，而是作为这个群里的一名普通群友自然参与当前聊天。请阅读前面的群聊上下文，选择一个自然的切入点发言，可以接续话题、补充信息、吐槽、提问或表达态度。不要解释任务，不要提及“上下文”“指令”“AI”或“机器人”，不要强行引用、@或逐句回答触发你的那条消息。直接输出一段适合发到群里的自然发言。'
+
 function getEventUserId (e) {
   const userId = e?.user_id ?? e?.sender?.user_id
   if (userId === null || userId === undefined) {
@@ -94,7 +96,7 @@ export class bym extends plugin {
     if (ChatGPTConfig.bym.maxTokens > 0) {
       sendMessageOption.maxToken = ChatGPTConfig.bym.maxTokens
     }
-    const userMessage = await intoUserMessage(e, {
+    const triggerUserMessage = await intoUserMessage(e, {
       handleReplyText: true,
       handleReplyImage: true,
       useRawMessage: true,
@@ -103,7 +105,21 @@ export class bym extends plugin {
       toggleMode: ChatGPTConfig.basic.toggleMode,
       togglePrefix: ChatGPTConfig.basic.togglePrefix
     })
-    const userText = extractTextFromUserMessage(userMessage) || e.msg || ''
+    const userText = extractTextFromUserMessage(triggerUserMessage) || e.msg || ''
+    const contextualModeActive = ChatGPTConfig.bym.speakingMode === 'contextual' &&
+      ChatGPTConfig.llm.enableGroupContext && e.isGroup
+    const userMessage = contextualModeActive
+      ? {
+          role: 'user',
+          content: [{
+            type: 'text',
+            text: ChatGPTConfig.bym.contextualPrompt?.trim() || DEFAULT_CONTEXTUAL_PROMPT
+          }]
+        }
+      : triggerUserMessage
+    if (ChatGPTConfig.bym.speakingMode === 'contextual' && !contextualModeActive) {
+      logger.debug('[BYM] 自主融入群聊模式未满足群聊上下文条件，回退为回复触发消息')
+    }
     // 伪人不记录历史
     // sendMessageOption.disableHistoryRead = true
     // sendMessageOption.disableHistorySave = true
@@ -242,7 +258,7 @@ export class bym extends plugin {
     // 异步提取记忆，不阻塞消息回复
     processUserMemory({
       event: e,
-      userMessage,
+      userMessage: triggerUserMessage,
       userText,
       conversationId: sendMessageOption.conversationId,
       assistantContents: response.contents,

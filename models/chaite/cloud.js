@@ -210,6 +210,8 @@ export async function initChaite () {
   chaite.runApiServer(app => {
     registerManagementPanelAutoLogin(app)
     app.use('/api/memory', authenticateMemoryRequest, MemoryRouter)
+  }, {
+    frontendDir: path.resolve('./plugins/chatgpt-plugin/resources/admin')
   })
 }
 

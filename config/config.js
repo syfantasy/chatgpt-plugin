@@ -33,6 +33,8 @@ class ChatGPTConfig {
    *   enable: boolean,
    *   hit: string[],
    *   probability: number,
+   *   speakingMode: 'reply' | 'contextual',
+   *   contextualPrompt: string,
    *   defaultPreset: string,
    *   presetPrefix?: string,
    *   presetMap: Array<{
@@ -54,6 +56,10 @@ class ChatGPTConfig {
     hit: ['bym'],
     // 不包含伪人必定触发词时的概率
     probability: 0.02,
+    // 发言策略：reply 回复触发消息；contextual 结合群聊上下文自主发言
+    speakingMode: 'reply',
+    // contextual 模式下替代触发消息发送给模型的本轮指令
+    contextualPrompt: '你现在不是在回复某一条特定消息，而是作为这个群里的一名普通群友自然参与当前聊天。请阅读前面的群聊上下文，选择一个自然的切入点发言，可以接续话题、补充信息、吐槽、提问或表达态度。不要解释任务，不要提及“上下文”“指令”“AI”或“机器人”，不要强行引用、@或逐句回答触发你的那条消息。直接输出一段适合发到群里的自然发言。',
     // 伪人模式的默认预设
     defaultPreset: '',
     // 伪人模式的预设前缀，会加在在所有其他预设前。例如此处可以用于配置通用的伪人发言风格（随意、模仿群友等），presetMap中专心配置角色设定即可
