@@ -233,6 +233,25 @@ export async function migrateDatabase () {
     }))
   }
 
+  // 注册内置的 QQ 头像工具。头像不会由预处理器自动引入，只有模型明确需要时才调用。
+  const getQQAvatarToolId = md5('get_qq_avatar')
+  const getQQAvatarToolCode = readEmbeddedCode(resourcesDir, 'GetQQAvatar')
+  const storedGetQQAvatarTool = await toolManager.getInstanceT(getQQAvatarToolId)
+  const loadedGetQQAvatarTool = await toolManager.getInstance('get_qq_avatar')
+  if (!storedGetQQAvatarTool || storedGetQQAvatarTool.code !== getQQAvatarToolCode || !loadedGetQQAvatarTool) {
+    logger.info('初始化内置的 get_qq_avatar 工具')
+    await toolManager.addInstance(new ToolDTO({
+      id: getQQAvatarToolId,
+      name: 'get_qq_avatar',
+      embedded: true,
+      status: 'enabled',
+      permission: 'public',
+      uploader: systemUser,
+      description: '按需获取 QQ 头像并返回图片 ref；支持机器人头像、当前消息被 @ 用户头像和直接发送头像',
+      code: getQQAvatarToolCode
+    }))
+  }
+
   // 将 ask_about_image 加入默认工具组
   if (await toolGroupsManager.getInstance('default_local')) {
     const defaultGroup = await toolGroupsManager.getInstance('default_local')
@@ -242,6 +261,10 @@ export async function migrateDatabase () {
     }
     if (defaultGroup && !defaultGroup.toolIds.includes(resolveImageRefToolId)) {
       defaultGroup.toolIds.push(resolveImageRefToolId)
+      await toolGroupsManager.upsertInstance(defaultGroup)
+    }
+    if (defaultGroup && !defaultGroup.toolIds.includes(getQQAvatarToolId)) {
+      defaultGroup.toolIds.push(getQQAvatarToolId)
       await toolGroupsManager.upsertInstance(defaultGroup)
     }
   }

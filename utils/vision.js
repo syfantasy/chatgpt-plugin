@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import * as crypto from 'node:crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import fetch from 'node-fetch'
 import { Chaite, ChaiteContext, createClient } from 'chaite'
 import ChatGPTConfig from '../config/config.js'
@@ -8,6 +9,31 @@ import { dataDir } from './common.js'
 
 const IMAGES_DIR = path.join(dataDir, 'images')
 const IMAGE_REFS_PATH = path.join(IMAGES_DIR, 'refs.json')
+const TOOL_ASSET_MANIFEST = path.join(dataDir, 'tool-image-assets.json')
+const DEFAULT_TOOL_ASSET_TTL = 7 * 24 * 60 * 60 * 1000
+let assetManifestLock = Promise.resolve()
+
+function withAssetManifestLock (fn) {
+  const next = assetManifestLock.then(fn, fn)
+  assetManifestLock = next.catch(() => {})
+  return next
+}
+
+async function readAssetManifest () {
+  try {
+    const data = JSON.parse(await readFile(TOOL_ASSET_MANIFEST, 'utf8'))
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
+async function writeAssetManifest (entries) {
+  await mkdir(path.dirname(TOOL_ASSET_MANIFEST), { recursive: true })
+  const tempPath = `${TOOL_ASSET_MANIFEST}.tmp`
+  await writeFile(tempPath, JSON.stringify(entries, null, 2), 'utf8')
+  await rename(tempPath, TOOL_ASSET_MANIFEST)
+}
 
 class VisionService {
   constructor () {
@@ -259,6 +285,86 @@ class VisionService {
       mimeType: cached.mimeType || image?.mimeType || '',
       filePath: cached.filePath || image?.filePath || ''
     }
+  }
+
+  /**
+   * Remove an image ref and optionally its cached file.
+   * History images remain persistent unless a caller explicitly registers them
+   * as temporary tool assets.
+   * @param {string} ref
+   * @param {string} [filePath]
+   * @returns {Promise<void>}
+   */
+  async forgetImage (ref, filePath = '') {
+    if (filePath) await rm(filePath, { force: true }).catch(() => {})
+    if (ref && this.refs[ref]) {
+      delete this.refs[ref]
+      this._saveRefs()
+    }
+  }
+
+  /**
+   * Delete expired temporary images created by tools.
+   * @param {number} [now]
+   * @param {string[]} [protectedRefs]
+   * @returns {Promise<number>}
+   */
+  async cleanupTemporaryImages (now = Date.now(), protectedRefs = []) {
+    return withAssetManifestLock(async () => {
+      const entries = await readAssetManifest()
+      const active = []
+      const protectedSet = new Set(protectedRefs)
+      let refsChanged = false
+
+      for (const entry of entries) {
+        if (!entry?.expiresAt || entry.expiresAt > now || protectedSet.has(entry.ref)) {
+          active.push(entry)
+          continue
+        }
+        if (entry.filePath) await rm(entry.filePath, { force: true }).catch(() => {})
+        if (entry.ref && this.refs[entry.ref]) {
+          delete this.refs[entry.ref]
+          refsChanged = true
+        }
+      }
+
+      await writeAssetManifest(active)
+      if (refsChanged) this._saveRefs()
+      return entries.length - active.length
+    })
+  }
+
+  /**
+   * Register an image created by a tool for automatic expiration.
+   * @param {{ref: string, filePath: string}} record
+   * @param {{source?: string, ttlMs?: number}} [options]
+   * @returns {Promise<object>}
+   */
+  async registerTemporaryImage (record, options = {}) {
+    if (!record?.ref || !record?.filePath) return record
+    if (!globalThis.__chaiteToolAssetCleanupTimer) {
+      const timer = setInterval(() => {
+        this.cleanupTemporaryImages().catch(() => {})
+      }, 6 * 60 * 60 * 1000)
+      timer.unref?.()
+      globalThis.__chaiteToolAssetCleanupTimer = timer
+    }
+
+    const ttlMs = Math.max(60_000, Number(options.ttlMs) || DEFAULT_TOOL_ASSET_TTL)
+    await this.cleanupTemporaryImages(Date.now(), [record.ref])
+    return withAssetManifestLock(async () => {
+      const entries = await readAssetManifest()
+      const next = entries.filter(entry => entry?.ref !== record.ref)
+      next.push({
+        ref: record.ref,
+        filePath: record.filePath,
+        source: options.source || 'tool',
+        createdAt: Date.now(),
+        expiresAt: Date.now() + ttlMs
+      })
+      await writeAssetManifest(next)
+      return record
+    })
   }
 }
 
