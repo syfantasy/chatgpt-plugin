@@ -38,6 +38,7 @@ import { MemoryRouter, authenticateMemoryRequest } from '../memory/router.js'
 import { SQLiteOperationLogStorage } from './storage/sqlite/operation_log_storage.js'
 import { SQLiteMcpServerStorage } from './storage/sqlite/mcp_server_storage.js'
 import { LowDBMcpServerStorage } from './storage/lowdb/mcp_server_storage.js'
+import { createDebugSanitizingLogger } from '../../utils/log.js'
 
 /**
  * 认证，以便共享上传
@@ -72,6 +73,7 @@ export async function initRagManager (model, dimensions) {
 }
 
 export async function initChaite () {
+  const chaiteLogger = createDebugSanitizingLogger(logger)
   const storage = ChatGPTConfig.chaite.storage
   let channelsStorage, chatPresetsStorage, toolsStorage, processorsStorage, userStateStorage, historyStorage, toolsGroupStorage, triggerStorage, operationLogStorage, mcpServerStorage
   switch (storage) {
@@ -134,7 +136,7 @@ export async function initChaite () {
   await triggerManager.initialize()
   const userModeSelector = new ChatGPTUserModeSelector()
   let chaite = Chaite.init(channelsManager, toolsManager, processorsManager, chatPresetManager, toolsGroupManager, triggerManager,
-    userModeSelector, userStateStorage, historyStorage, logger)
+    userModeSelector, userStateStorage, historyStorage, chaiteLogger)
   if (storage === 'sqlite') {
     operationLogStorage = new SQLiteOperationLogStorage(path.join(dataDir, 'data.db'), ChatGPTConfig.chaite.operationLogLimit)
     await operationLogStorage.initialize()
