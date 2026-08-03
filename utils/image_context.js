@@ -1,5 +1,6 @@
 import { asyncLocalStorage } from 'chaite'
 import { readFile } from 'node:fs/promises'
+import { detectSupportedImageMime, requireSupportedImage } from './image_mime.js'
 
 function cleanMime (value, fallback = 'image/jpeg') {
   const mime = String(value || '').split(';')[0].trim().toLowerCase()
@@ -12,14 +13,7 @@ function mimeFromDataUrl (value, fallback = 'image/jpeg') {
 }
 
 function sniffMime (buffer, fallback = 'image/jpeg') {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return fallback
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
-  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer.toString('ascii', 1, 4) === 'PNG') return 'image/png'
-  const head = buffer.toString('ascii', 0, Math.min(buffer.length, 12))
-  if (head.startsWith('GIF87a') || head.startsWith('GIF89a')) return 'image/gif'
-  if (head.startsWith('RIFF') && head.slice(8, 12) === 'WEBP') return 'image/webp'
-  if (head.startsWith('BM')) return 'image/bmp'
-  return fallback
+  return detectSupportedImageMime(buffer) || fallback
 }
 
 function toDataUrl (base64, mimeType = 'image/jpeg') {
@@ -163,13 +157,13 @@ export async function collectImageInputs (options = {}) {
 export async function imageToBuffer (input, options = {}) {
   const image = resolveImageInput(input, options)
   if (!image) throw new Error('图片输入为空或格式不受支持')
-  if (image.buffer) return image.buffer
-  if (image.dataUrl) return Buffer.from(image.dataUrl.slice(image.dataUrl.indexOf(',') + 1), 'base64')
-  if (image.filePath) return Buffer.from(await readFile(image.filePath))
+  if (image.buffer) return requireSupportedImage(image.buffer).buffer
+  if (image.dataUrl) return requireSupportedImage(Buffer.from(image.dataUrl.slice(image.dataUrl.indexOf(',') + 1), 'base64')).buffer
+  if (image.filePath) return requireSupportedImage(Buffer.from(await readFile(image.filePath))).buffer
   if (image.url) {
     const response = await fetch(image.url, { redirect: 'follow' })
     if (!response.ok) throw new Error(`获取图片失败: ${response.status} ${response.statusText}`)
-    return Buffer.from(await response.arrayBuffer())
+    return requireSupportedImage(Buffer.from(await response.arrayBuffer())).buffer
   }
   throw new Error('图片没有可读取的数据')
 }
@@ -177,16 +171,15 @@ export async function imageToBuffer (input, options = {}) {
 export async function imageToDataUrl (input, options = {}) {
   const image = resolveImageInput(input, options)
   if (!image) throw new Error('图片输入为空或格式不受支持')
-  if (image.dataUrl) return image.dataUrl
   const buffer = await imageToBuffer(image, options)
-  return toDataUrl(buffer.toString('base64'), sniffMime(buffer, image.mimeType))
+  return toDataUrl(buffer.toString('base64'), detectSupportedImageMime(buffer))
 }
 
 export async function imageToInlineData (input, options = {}) {
   const image = resolveImageInput(input, options)
   if (!image) throw new Error('图片输入为空或格式不受支持')
   const buffer = await imageToBuffer(image, options)
-  return { mime_type: sniffMime(buffer, cleanMime(image.mimeType)), data: buffer.toString('base64') }
+  return { mime_type: detectSupportedImageMime(buffer), data: buffer.toString('base64') }
 }
 
 // 兼容已有工具的导入方式；临时资源的实际生命周期由 visionService 管理。

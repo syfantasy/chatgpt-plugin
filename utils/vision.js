@@ -6,6 +6,7 @@ import fetch from 'node-fetch'
 import { Chaite, ChaiteContext, createClient } from 'chaite'
 import ChatGPTConfig from '../config/config.js'
 import { dataDir } from './common.js'
+import { detectSupportedImageMime } from './image_mime.js'
 
 const IMAGES_DIR = path.join(dataDir, 'images')
 const IMAGE_REFS_PATH = path.join(IMAGES_DIR, 'refs.json')
@@ -83,9 +84,11 @@ class VisionService {
    * @returns {{ref: string, mimeType: string, ext: string, filePath: string}}
    */
   saveImageFromBuffer (buffer, mimeType = 'image/jpeg', refOverride = '', source = {}) {
+    const detectedMimeType = detectSupportedImageMime(buffer)
+    if (!detectedMimeType) throw new Error('不是受支持的图片')
     const md5 = crypto.createHash('md5').update(buffer).digest('hex')
     const ref = refOverride || md5
-    const normalizedMimeType = String(mimeType || 'image/jpeg').split(';')[0].trim()
+    const normalizedMimeType = detectedMimeType
     const extMap = {
       'image/jpeg': '.jpg',
       'image/png': '.png',
