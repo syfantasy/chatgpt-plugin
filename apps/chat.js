@@ -80,9 +80,16 @@ export class Chat extends plugin {
     const userText = extractTextFromUserMessage(userMessage) || e.msg || ''
     sendMessageOptions.conversationId = state?.current?.conversationId
     sendMessageOptions.parentMessageId = state?.current?.messageId || state?.conversations.find(c => c.id === sendMessageOptions.conversationId)?.lastMessageId
+    const disableConversationContext = preset.disableConversationContext === true
+    if (disableConversationContext) {
+      // Keep the conversation ID for display/history grouping, but detach this
+      // turn from the previous branch. The current turn and tool-call rounds
+      // can still build on each other through the new branch.
+      sendMessageOptions.parentMessageId = crypto.randomUUID()
+    }
     const retainDynamicContextHistory = preset.dynamicContextHistory === 'retain' ||
       (preset.dynamicContextHistory !== 'discard' && Config.llm.retainDynamicContextHistory === true)
-    if (!retainDynamicContextHistory && sendMessageOptions.parentMessageId) {
+    if (!disableConversationContext && !retainDynamicContextHistory && sendMessageOptions.parentMessageId) {
       const historyManager = Chaite.getInstance().getHistoryManager()
       if (typeof historyManager.removeHistory === 'function') {
         const previousHistory = await historyManager.getHistory(
