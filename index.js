@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import ChatGPTConfig from './config/config.js'
 import { initChaite } from './models/chaite/cloud.js'
+import { visionService } from './utils/vision.js'
 logger.info('**************************************')
 logger.info('chatgpt-plugin加载中')
 
@@ -37,6 +38,7 @@ global.chatgpt = {
 }
 
 ChatGPTConfig.startSync('./plugins/chatgpt-plugin/data')
+visionService.startCleanupScheduler()
 initChaite()
 logger.info('chatgpt-plugin加载成功')
 logger.info(`当前版本${ChatGPTConfig.version}`)

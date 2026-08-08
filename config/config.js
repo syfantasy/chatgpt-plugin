@@ -208,7 +208,9 @@ class ChatGPTConfig {
    *   imageDescriptionSystemPrompt: string,
    *   defaultQuestion: string,
    *   maxImageSize: number,
-   *   enableGroupContextImages: boolean
+   *   enableGroupContextImages: boolean,
+   *   imageRetentionPreset: 'forever' | '30d' | '7d' | '3d' | '1d' | 'custom',
+   *   imageRetentionCustomHours: number
    * }}
    */
   vision = {
@@ -226,7 +228,11 @@ class ChatGPTConfig {
     // 最大处理图片大小（bytes），默认 10MB
     maxImageSize: 10485760,
     // 是否将群聊上下文中的图片也存入历史（开启后图片会进入主干对话）
-    enableGroupContextImages: true
+    enableGroupContextImages: true,
+    // 图片缓存保留策略。默认永久保留，避免升级后意外删除已有图片。
+    imageRetentionPreset: 'forever',
+    // 自定义保留时间（小时），仅在 imageRetentionPreset 为 custom 时生效。
+    imageRetentionCustomHours: 24
   }
 
   /**

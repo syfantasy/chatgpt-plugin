@@ -7,6 +7,7 @@ import { Chaite, ChaiteContext, createClient } from 'chaite'
 import ChatGPTConfig from '../config/config.js'
 import { dataDir } from './common.js'
 import { detectSupportedImageMime } from './image_mime.js'
+import { cleanupExpiredImageCache, resolveImageRetentionMs } from './imageCacheCleanup.js'
 
 const IMAGES_DIR = path.join(dataDir, 'images')
 const IMAGE_REFS_PATH = path.join(IMAGES_DIR, 'refs.json')
@@ -42,6 +43,42 @@ class VisionService {
       fs.mkdirSync(IMAGES_DIR, { recursive: true })
     }
     this.refs = this._loadRefs()
+    this.cleanupTimer = null
+  }
+
+  cleanupExpiredImages () {
+    const retentionMs = resolveImageRetentionMs(ChatGPTConfig.vision)
+    if (retentionMs <= 0) return { deleted: 0, bytesFreed: 0, refsRemoved: 0 }
+
+    const result = cleanupExpiredImageCache({
+      imagesDir: IMAGES_DIR,
+      refsPath: IMAGE_REFS_PATH,
+      retentionMs
+    })
+    if (result.refsRemoved > 0) this.refs = this._loadRefs()
+    if (result.deleted > 0) {
+      logger.info(`[Vision] cleaned ${result.deleted} expired image(s), freed ${(result.bytesFreed / 1024 / 1024).toFixed(2)} MiB`)
+    }
+    return result
+  }
+
+  startCleanupScheduler () {
+    if (this.cleanupTimer) return
+
+    try {
+      this.cleanupExpiredImages()
+    } catch (err) {
+      logger.warn(`[Vision] image cache cleanup failed: ${err.message}`)
+    }
+
+    this.cleanupTimer = setInterval(() => {
+      try {
+        this.cleanupExpiredImages()
+      } catch (err) {
+        logger.warn(`[Vision] image cache cleanup failed: ${err.message}`)
+      }
+    }, 60 * 60 * 1000)
+    this.cleanupTimer.unref?.()
   }
 
   _loadRefs () {
