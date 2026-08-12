@@ -22,10 +22,39 @@ function toDataUrl (base64, mimeType = 'image/jpeg') {
 
 function parseRefText (text) {
   const refs = []
-  const re = /\[图片\s+ref:([^\]，,\s]+)[^\]]*\]/gi
+  const re = /\[(?:工具)?图片\s+ref:([^\]，,\s]+)[^\]]*\]/gi
   let match
   while ((match = re.exec(String(text || '')))) refs.push(match[1])
   return refs
+}
+
+/**
+ * Render an image ref as the text marker models see. Tool-produced refs
+ * (t_ prefix) point the model to look_at_image; conversation refs point to
+ * ask_about_image. `hint: false` renders the bare marker without tool advice.
+ */
+export function imageRefMarker (ref, options = {}) {
+  const isToolImage = String(ref).startsWith('t_')
+  const label = isToolImage ? '工具图片' : '图片'
+  if (options.hint === false) return `[${label} ref:${ref}]`
+  const tool = isToolImage ? 'look_at_image' : 'ask_about_image'
+  return `[${label} ref:${ref}，可使用 ${tool} 工具查看图片内容]`
+}
+
+/**
+ * Replace the given refs' text markers with a plain [图片] placeholder.
+ * Used when the actual image is inline for the current model: the position
+ * stays readable but the model no longer sees a ref it could redundantly
+ * feed to an image-viewing tool.
+ */
+export function maskImageRefMarkers (text, refs) {
+  let out = String(text || '')
+  for (const ref of refs || []) {
+    if (!ref) continue
+    const escaped = String(ref).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    out = out.replace(new RegExp(`\\[(?:工具)?图片\\s+ref:${escaped}(?![\\w-])[^\\]]*\\]`, 'gi'), '[图片]')
+  }
+  return out
 }
 
 function unwrap (value) {

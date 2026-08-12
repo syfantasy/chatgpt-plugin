@@ -116,6 +116,9 @@ class VisionService {
 
   /**
    * Save image from buffer to disk, return ref (MD5)
+   * Tool-produced images (source.origin === 'tool') get a `t_` ref prefix so
+   * models and tools can tell them apart from conversation images; context
+   * images keep bare refs for compatibility with existing history markers.
    * @param {Buffer} buffer
    * @param {string} mimeType
    * @returns {{ref: string, mimeType: string, ext: string, filePath: string}}
@@ -124,7 +127,10 @@ class VisionService {
     const detectedMimeType = detectSupportedImageMime(buffer)
     if (!detectedMimeType) throw new Error('不是受支持的图片')
     const md5 = crypto.createHash('md5').update(buffer).digest('hex')
-    const ref = refOverride || md5
+    let ref = refOverride || md5
+    if (source.origin === 'tool' && !ref.startsWith('t_')) {
+      ref = `t_${ref}`
+    }
     const normalizedMimeType = detectedMimeType
     const extMap = {
       'image/jpeg': '.jpg',
@@ -153,9 +159,11 @@ class VisionService {
    * Save image from base64 string (with or without data: prefix) or URL
    * @param {string} source - base64 string or URL
    * @param {string} mimeType
+   * @param {string} [refOverride]
+   * @param {'tool' | ''} [origin] - 'tool' marks the image as tool-produced (ref gets a t_ prefix)
    * @returns {Promise<{ref: string, mimeType: string, ext: string, filePath: string}>}
    */
-  async saveImage (source, mimeType = 'image/jpeg', refOverride = '') {
+  async saveImage (source, mimeType = 'image/jpeg', refOverride = '', origin = '') {
     let buffer
     let sourceUrl = ''
 
@@ -175,7 +183,7 @@ class VisionService {
       buffer = Buffer.from(source, 'base64')
     }
 
-    return this.saveImageFromBuffer(buffer, mimeType, refOverride, { url: sourceUrl })
+    return this.saveImageFromBuffer(buffer, mimeType, refOverride, origin ? { url: sourceUrl, origin } : { url: sourceUrl })
   }
 
   /**
