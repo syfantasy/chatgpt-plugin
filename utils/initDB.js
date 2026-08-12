@@ -128,7 +128,7 @@ export async function migrateDatabase () {
       name: 'ImageRefPreProcessor',
       embedded: true,
       uploader: systemUser,
-      description: '自动处理图片：视觉模型保留原图进入主干对话，非视觉模型替换为引用文本，支持 ask_about_image 工具按需查询',
+      description: '自动处理图片：模型看得到的图片进入主干对话并隐藏 ref，看不到的图片（非视觉模型的全部图片、视觉模型的 GIF 等 forceImageRefMimes 格式）保留 ref 文本供识图工具查询',
       code: imageRefProcessorCode
     }))
   }
@@ -210,8 +210,27 @@ export async function migrateDatabase () {
       status: 'enabled',
       permission: 'public',
       uploader: systemUser,
-      description: '按引用ID查询图片内容，支持针对图片特定细节的定向提问（如颜色、文字、人物特征等）',
+      description: '按引用ID查询聊天中模型看不到的图片（[图片 ref:xxx]），支持定向提问；工具产出的图片请用 look_at_image',
       code: askAboutImageToolCode
+    }))
+  }
+
+  // 注册内置的 look_at_image 工具：查看工具产出的图片（t_ 前缀 ref）
+  const lookAtImageToolId = md5('look_at_image')
+  const lookAtImageToolCode = readEmbeddedCode(resourcesDir, 'LookAtImage')
+  const storedLookAtImageTool = await toolManager.getInstanceT(lookAtImageToolId)
+  const loadedLookAtImageTool = await toolManager.getInstance('look_at_image')
+  if (!storedLookAtImageTool || storedLookAtImageTool.code !== lookAtImageToolCode || !loadedLookAtImageTool) {
+    logger.info('初始化内置的 look_at_image 工具')
+    await toolManager.addInstance(new ToolDTO({
+      id: lookAtImageToolId,
+      name: 'look_at_image',
+      embedded: true,
+      status: 'enabled',
+      permission: 'public',
+      uploader: systemUser,
+      description: '查看工具返回的图片内容（形如 t_xxx 的 ref），交给识图渠道并返回描述；仅在模型需要了解图片内容时调用',
+      code: lookAtImageToolCode
     }))
   }
 
@@ -257,6 +276,10 @@ export async function migrateDatabase () {
     const defaultGroup = await toolGroupsManager.getInstance('default_local')
     if (defaultGroup && !defaultGroup.toolIds.includes(askAboutImageToolId)) {
       defaultGroup.toolIds.push(askAboutImageToolId)
+      await toolGroupsManager.upsertInstance(defaultGroup)
+    }
+    if (defaultGroup && !defaultGroup.toolIds.includes(lookAtImageToolId)) {
+      defaultGroup.toolIds.push(lookAtImageToolId)
       await toolGroupsManager.upsertInstance(defaultGroup)
     }
     if (defaultGroup && !defaultGroup.toolIds.includes(resolveImageRefToolId)) {
