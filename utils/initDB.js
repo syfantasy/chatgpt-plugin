@@ -123,12 +123,13 @@ export async function migrateDatabase () {
   if (!storedImageRefProcessor || storedImageRefProcessor.code !== imageRefProcessorCode || !loadedImageRefProcessor) {
     logger.info('初始化内置的图片引用预处理器')
     await processorsManager.addInstance(new ProcessorDTO({
+      ...storedImageRefProcessor,
       id: imageRefProcessorId,
       type: 'pre',
       name: 'ImageRefPreProcessor',
       embedded: true,
-      uploader: systemUser,
-      description: '自动处理图片：视觉模型保留原图进入主干对话，非视觉模型替换为引用文本，支持 ask_about_image 工具按需查询',
+      uploader: storedImageRefProcessor?.uploader || systemUser,
+      description: '自动处理图片：模型看得到的图片进入主干对话并隐藏 ref，看不到的图片（非视觉模型的全部图片、视觉模型的 GIF 等 forceImageRefMimes 格式）保留 ref 文本供识图工具查询',
       code: imageRefProcessorCode
     }))
   }
@@ -204,14 +205,35 @@ export async function migrateDatabase () {
   if (!storedAskAboutImageTool || storedAskAboutImageTool.code !== askAboutImageToolCode || !loadedAskAboutImageTool) {
     logger.info('初始化内置的 ask_about_image 工具')
     await toolManager.addInstance(new ToolDTO({
+      ...storedAskAboutImageTool,
       id: askAboutImageToolId,
       name: 'ask_about_image',
       embedded: true,
-      status: 'enabled',
-      permission: 'public',
-      uploader: systemUser,
-      description: '按引用ID查询图片内容，支持针对图片特定细节的定向提问（如颜色、文字、人物特征等）',
+      status: storedAskAboutImageTool?.status || 'enabled',
+      permission: storedAskAboutImageTool?.permission || 'public',
+      uploader: storedAskAboutImageTool?.uploader || systemUser,
+      description: '按引用ID查询聊天中模型看不到的图片（[图片 ref:xxx]），支持定向提问；工具产出的图片请用 look_at_image',
       code: askAboutImageToolCode
+    }))
+  }
+
+  // 注册内置的 look_at_image 工具：查看工具产出的图片（t_ 前缀 ref）
+  const lookAtImageToolId = md5('look_at_image')
+  const lookAtImageToolCode = readEmbeddedCode(resourcesDir, 'LookAtImage')
+  const storedLookAtImageTool = await toolManager.getInstanceT(lookAtImageToolId)
+  const loadedLookAtImageTool = await toolManager.getInstance('look_at_image')
+  if (!storedLookAtImageTool || storedLookAtImageTool.code !== lookAtImageToolCode || !loadedLookAtImageTool) {
+    logger.info('初始化内置的 look_at_image 工具')
+    await toolManager.addInstance(new ToolDTO({
+      ...storedLookAtImageTool,
+      id: lookAtImageToolId,
+      name: 'look_at_image',
+      embedded: true,
+      status: storedLookAtImageTool?.status || 'enabled',
+      permission: storedLookAtImageTool?.permission || 'public',
+      uploader: storedLookAtImageTool?.uploader || systemUser,
+      description: '查看工具返回的图片内容（形如 t_xxx 的 ref），交给识图渠道并返回描述；仅在模型需要了解图片内容时调用',
+      code: lookAtImageToolCode
     }))
   }
 
@@ -222,14 +244,35 @@ export async function migrateDatabase () {
   if (!storedResolveImageRefTool || storedResolveImageRefTool.code !== resolveImageRefToolCode || !loadedResolveImageRefTool) {
     logger.info('init embedded resolve_image_ref tool')
     await toolManager.addInstance(new ToolDTO({
+      ...storedResolveImageRefTool,
       id: resolveImageRefToolId,
       name: 'resolve_image_ref',
       embedded: true,
-      status: 'enabled',
-      permission: 'public',
-      uploader: systemUser,
+      status: storedResolveImageRefTool?.status || 'enabled',
+      permission: storedResolveImageRefTool?.permission || 'public',
+      uploader: storedResolveImageRefTool?.uploader || systemUser,
       description: 'Resolve image ref to original image URL for image processing tools',
       code: resolveImageRefToolCode
+    }))
+  }
+
+  // 注册内置的 QQ 头像工具。头像不会由预处理器自动引入，只有模型明确需要时才调用。
+  const getQQAvatarToolId = md5('GetQQAvatar')
+  const getQQAvatarToolCode = readEmbeddedCode(resourcesDir, 'GetQQAvatar')
+  const storedGetQQAvatarTool = await toolManager.getInstanceT(getQQAvatarToolId)
+  const loadedGetQQAvatarTool = await toolManager.getInstance('GetQQAvatar')
+  if (!storedGetQQAvatarTool || storedGetQQAvatarTool.code !== getQQAvatarToolCode || !loadedGetQQAvatarTool) {
+    logger.info('初始化内置的 GetQQAvatar 工具')
+    await toolManager.addInstance(new ToolDTO({
+      ...storedGetQQAvatarTool,
+      id: getQQAvatarToolId,
+      name: 'GetQQAvatar',
+      embedded: true,
+      status: storedGetQQAvatarTool?.status || 'enabled',
+      permission: storedGetQQAvatarTool?.permission || 'public',
+      uploader: storedGetQQAvatarTool?.uploader || systemUser,
+      description: '按需获取 QQ 头像并返回图片 ref；支持机器人头像、当前消息被 @ 用户头像和直接发送头像',
+      code: getQQAvatarToolCode
     }))
   }
 
@@ -240,8 +283,16 @@ export async function migrateDatabase () {
       defaultGroup.toolIds.push(askAboutImageToolId)
       await toolGroupsManager.upsertInstance(defaultGroup)
     }
+    if (defaultGroup && !defaultGroup.toolIds.includes(lookAtImageToolId)) {
+      defaultGroup.toolIds.push(lookAtImageToolId)
+      await toolGroupsManager.upsertInstance(defaultGroup)
+    }
     if (defaultGroup && !defaultGroup.toolIds.includes(resolveImageRefToolId)) {
       defaultGroup.toolIds.push(resolveImageRefToolId)
+      await toolGroupsManager.upsertInstance(defaultGroup)
+    }
+    if (defaultGroup && !defaultGroup.toolIds.includes(getQQAvatarToolId)) {
+      defaultGroup.toolIds.push(getQQAvatarToolId)
       await toolGroupsManager.upsertInstance(defaultGroup)
     }
   }

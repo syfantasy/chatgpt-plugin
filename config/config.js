@@ -209,6 +209,7 @@ class ChatGPTConfig {
    *   defaultQuestion: string,
    *   maxImageSize: number,
    *   enableGroupContextImages: boolean,
+   *   forceImageRefMimes: string[],
    *   imageRetentionPreset: 'forever' | '30d' | '7d' | '3d' | '1d' | 'custom',
    *   imageRetentionCustomHours: number
    * }}
@@ -229,6 +230,9 @@ class ChatGPTConfig {
     maxImageSize: 10485760,
     // 是否将群聊上下文中的图片也存入历史（开启后图片会进入主干对话）
     enableGroupContextImages: true,
+    // 即使视觉模型也无法直接查看的图片格式：这些格式不进入主干对话，
+    // 而是保留 ref 文本，由模型调用 ask_about_image 交给识图渠道处理（识图渠道可配置支持 GIF 的模型）。
+    forceImageRefMimes: ['image/gif'],
     // 图片缓存保留策略。默认永久保留，避免升级后意外删除已有图片。
     imageRetentionPreset: 'forever',
     // 自定义保留时间（小时），仅在 imageRetentionPreset 为 custom 时生效。

@@ -1,14 +1,41 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import * as crypto from 'node:crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import fetch from 'node-fetch'
 import { Chaite, ChaiteContext, createClient } from 'chaite'
 import ChatGPTConfig from '../config/config.js'
 import { dataDir } from './common.js'
+import { detectSupportedImageMime } from './image_mime.js'
 import { cleanupExpiredImageCache, resolveImageRetentionMs } from './imageCacheCleanup.js'
 
 const IMAGES_DIR = path.join(dataDir, 'images')
 const IMAGE_REFS_PATH = path.join(IMAGES_DIR, 'refs.json')
+const TOOL_ASSET_MANIFEST = path.join(dataDir, 'tool-image-assets.json')
+const DEFAULT_TOOL_ASSET_TTL = 7 * 24 * 60 * 60 * 1000
+let assetManifestLock = Promise.resolve()
+
+function withAssetManifestLock (fn) {
+  const next = assetManifestLock.then(fn, fn)
+  assetManifestLock = next.catch(() => {})
+  return next
+}
+
+async function readAssetManifest () {
+  try {
+    const data = JSON.parse(await readFile(TOOL_ASSET_MANIFEST, 'utf8'))
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
+async function writeAssetManifest (entries) {
+  await mkdir(path.dirname(TOOL_ASSET_MANIFEST), { recursive: true })
+  const tempPath = `${TOOL_ASSET_MANIFEST}.tmp`
+  await writeFile(tempPath, JSON.stringify(entries, null, 2), 'utf8')
+  await rename(tempPath, TOOL_ASSET_MANIFEST)
+}
 
 class VisionService {
   constructor () {
@@ -89,14 +116,22 @@ class VisionService {
 
   /**
    * Save image from buffer to disk, return ref (MD5)
+   * Tool-produced images (source.origin === 'tool') get a `t_` ref prefix so
+   * models and tools can tell them apart from conversation images; context
+   * images keep bare refs for compatibility with existing history markers.
    * @param {Buffer} buffer
    * @param {string} mimeType
    * @returns {{ref: string, mimeType: string, ext: string, filePath: string}}
    */
   saveImageFromBuffer (buffer, mimeType = 'image/jpeg', refOverride = '', source = {}) {
+    const detectedMimeType = detectSupportedImageMime(buffer)
+    if (!detectedMimeType) throw new Error('不是受支持的图片')
     const md5 = crypto.createHash('md5').update(buffer).digest('hex')
-    const ref = refOverride || md5
-    const normalizedMimeType = String(mimeType || 'image/jpeg').split(';')[0].trim()
+    let ref = refOverride || md5
+    if (source.origin === 'tool' && !ref.startsWith('t_')) {
+      ref = `t_${ref}`
+    }
+    const normalizedMimeType = detectedMimeType
     const extMap = {
       'image/jpeg': '.jpg',
       'image/png': '.png',
@@ -124,9 +159,11 @@ class VisionService {
    * Save image from base64 string (with or without data: prefix) or URL
    * @param {string} source - base64 string or URL
    * @param {string} mimeType
+   * @param {string} [refOverride]
+   * @param {'tool' | ''} [origin] - 'tool' marks the image as tool-produced (ref gets a t_ prefix)
    * @returns {Promise<{ref: string, mimeType: string, ext: string, filePath: string}>}
    */
-  async saveImage (source, mimeType = 'image/jpeg', refOverride = '') {
+  async saveImage (source, mimeType = 'image/jpeg', refOverride = '', origin = '') {
     let buffer
     let sourceUrl = ''
 
@@ -146,7 +183,7 @@ class VisionService {
       buffer = Buffer.from(source, 'base64')
     }
 
-    return this.saveImageFromBuffer(buffer, mimeType, refOverride, { url: sourceUrl })
+    return this.saveImageFromBuffer(buffer, mimeType, refOverride, origin ? { url: sourceUrl, origin } : { url: sourceUrl })
   }
 
   /**
@@ -296,6 +333,86 @@ class VisionService {
       mimeType: cached.mimeType || image?.mimeType || '',
       filePath: cached.filePath || image?.filePath || ''
     }
+  }
+
+  /**
+   * Remove an image ref and optionally its cached file.
+   * History images remain persistent unless a caller explicitly registers them
+   * as temporary tool assets.
+   * @param {string} ref
+   * @param {string} [filePath]
+   * @returns {Promise<void>}
+   */
+  async forgetImage (ref, filePath = '') {
+    if (filePath) await rm(filePath, { force: true }).catch(() => {})
+    if (ref && this.refs[ref]) {
+      delete this.refs[ref]
+      this._saveRefs()
+    }
+  }
+
+  /**
+   * Delete expired temporary images created by tools.
+   * @param {number} [now]
+   * @param {string[]} [protectedRefs]
+   * @returns {Promise<number>}
+   */
+  async cleanupTemporaryImages (now = Date.now(), protectedRefs = []) {
+    return withAssetManifestLock(async () => {
+      const entries = await readAssetManifest()
+      const active = []
+      const protectedSet = new Set(protectedRefs)
+      let refsChanged = false
+
+      for (const entry of entries) {
+        if (!entry?.expiresAt || entry.expiresAt > now || protectedSet.has(entry.ref)) {
+          active.push(entry)
+          continue
+        }
+        if (entry.filePath) await rm(entry.filePath, { force: true }).catch(() => {})
+        if (entry.ref && this.refs[entry.ref]) {
+          delete this.refs[entry.ref]
+          refsChanged = true
+        }
+      }
+
+      await writeAssetManifest(active)
+      if (refsChanged) this._saveRefs()
+      return entries.length - active.length
+    })
+  }
+
+  /**
+   * Register an image created by a tool for automatic expiration.
+   * @param {{ref: string, filePath: string}} record
+   * @param {{source?: string, ttlMs?: number}} [options]
+   * @returns {Promise<object>}
+   */
+  async registerTemporaryImage (record, options = {}) {
+    if (!record?.ref || !record?.filePath) return record
+    if (!globalThis.__chaiteToolAssetCleanupTimer) {
+      const timer = setInterval(() => {
+        this.cleanupTemporaryImages().catch(() => {})
+      }, 6 * 60 * 60 * 1000)
+      timer.unref?.()
+      globalThis.__chaiteToolAssetCleanupTimer = timer
+    }
+
+    const ttlMs = Math.max(60_000, Number(options.ttlMs) || DEFAULT_TOOL_ASSET_TTL)
+    await this.cleanupTemporaryImages(Date.now(), [record.ref])
+    return withAssetManifestLock(async () => {
+      const entries = await readAssetManifest()
+      const next = entries.filter(entry => entry?.ref !== record.ref)
+      next.push({
+        ref: record.ref,
+        filePath: record.filePath,
+        source: options.source || 'tool',
+        createdAt: Date.now(),
+        expiresAt: Date.now() + ttlMs
+      })
+      await writeAssetManifest(next)
+      return record
+    })
   }
 }
 
