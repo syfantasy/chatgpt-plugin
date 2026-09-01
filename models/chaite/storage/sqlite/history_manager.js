@@ -1,5 +1,5 @@
 import { AbstractHistoryManager } from 'chaite'
-import sqlite3 from 'sqlite3'
+import { openSQLiteDatabase } from './runtime.js'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
@@ -38,7 +38,7 @@ export class SQLiteHistoryManager extends AbstractHistoryManager {
         fs.mkdirSync(this.imagesDir, { recursive: true })
       }
 
-      this.db = new sqlite3.Database(this.dbPath, async (err) => {
+      this.db = openSQLiteDatabase(this.dbPath, async (err) => {
         if (err) {
           return reject(err)
         }
@@ -369,50 +369,13 @@ export class SQLiteHistoryManager extends AbstractHistoryManager {
       return
     }
 
-    return new Promise((resolve, reject) => {
-      let settled = false
-      const finish = (err) => {
-        if (settled) return
-        settled = true
-        if (err) reject(err)
-        else resolve()
+    const sql = this._upsertSql(records[0])
+    const fields = Object.keys(records[0])
+    await this.db.transaction(async transaction => {
+      for (const record of records) {
+        await transaction.run(sql, fields.map(field => record[field]))
       }
-      const rollback = (err) => {
-        this.db.run('ROLLBACK', () => finish(err))
-      }
-
-      this.db.serialize(() => {
-        this.db.run('BEGIN TRANSACTION', (err) => {
-          if (err) return finish(err)
-
-          const sql = this._upsertSql(records[0])
-          const fields = Object.keys(records[0])
-          const stmt = this.db.prepare(sql, (err) => {
-            if (err) return rollback(err)
-
-            let index = 0
-            const runNext = () => {
-              if (index >= records.length) {
-                return stmt.finalize((err) => {
-                  if (err) return rollback(err)
-                  this.db.run('COMMIT', finish)
-                })
-              }
-
-              const record = records[index]
-              const values = fields.map(field => record[field])
-              stmt.run(values, (err) => {
-                if (err) return rollback(err)
-                index++
-                runNext()
-              })
-            }
-
-            runNext()
-          })
-        })
-      })
-    })
+    }, { priority: 'high', label: `save ${records.length} history messages` })
   }
 
   /**
@@ -548,36 +511,21 @@ export class SQLiteHistoryManager extends AbstractHistoryManager {
    */
   async removeHistory (messageId, conversationId) {
     await this.ensureInitialized()
-    return new Promise((resolve, reject) => {
-      this.db.serialize(() => {
-        this.db.run('BEGIN TRANSACTION', (beginError) => {
-          if (beginError) return reject(beginError)
-          this.db.get(
-            `SELECT parentId FROM ${this.tableName} WHERE id = ? AND conversationId = ?`,
-            [messageId, conversationId],
-            (getError, row) => {
-              if (getError) return this.db.run('ROLLBACK', () => reject(getError))
-              if (!row) return this.db.run('COMMIT', () => resolve())
-              this.db.run(
-                `UPDATE ${this.tableName} SET parentId = ? WHERE conversationId = ? AND parentId = ?`,
-                [row.parentId || null, conversationId, messageId],
-                (updateError) => {
-                  if (updateError) return this.db.run('ROLLBACK', () => reject(updateError))
-                  this.db.run(
-                    `DELETE FROM ${this.tableName} WHERE id = ? AND conversationId = ?`,
-                    [messageId, conversationId],
-                    (deleteError) => {
-                      if (deleteError) return this.db.run('ROLLBACK', () => reject(deleteError))
-                      this.db.run('COMMIT', (commitError) => commitError ? reject(commitError) : resolve())
-                    }
-                  )
-                }
-              )
-            }
-          )
-        })
-      })
-    })
+    await this.db.transaction(async transaction => {
+      const row = await transaction.get(
+        `SELECT parentId FROM ${this.tableName} WHERE id = ? AND conversationId = ?`,
+        [messageId, conversationId]
+      )
+      if (!row) return
+      await transaction.run(
+        `UPDATE ${this.tableName} SET parentId = ? WHERE conversationId = ? AND parentId = ?`,
+        [row.parentId || null, conversationId, messageId]
+      )
+      await transaction.run(
+        `DELETE FROM ${this.tableName} WHERE id = ? AND conversationId = ?`,
+        [messageId, conversationId]
+      )
+    }, { priority: 'high', label: 'remove history message' })
   }
 
   /**

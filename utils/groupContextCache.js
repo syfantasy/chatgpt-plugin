@@ -1,4 +1,4 @@
-import sqlite3 from 'sqlite3'
+import { openSQLiteDatabase } from '../models/chaite/storage/sqlite/runtime.js'
 import path from 'path'
 import * as crypto from 'node:crypto'
 import { visionService } from './vision.js'
@@ -18,7 +18,7 @@ class GroupContextCache {
     this._initPromise = new Promise((resolve, reject) => {
       const dbPath = path.join(dataDir, 'data.db')
       logger.debug(`[GroupContext] opening db at ${dbPath}`)
-      this.db = new sqlite3.Database(dbPath, err => {
+      this.db = openSQLiteDatabase(dbPath, err => {
         if (err) return reject(err)
         this.db.run(`CREATE TABLE IF NOT EXISTS group_context_cache (
           groupId TEXT PRIMARY KEY,

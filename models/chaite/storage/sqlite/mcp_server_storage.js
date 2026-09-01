@@ -1,11 +1,11 @@
 import { ChaiteStorage } from 'chaite'
-import sqlite3 from 'sqlite3'
+import { openSQLiteDatabase } from './runtime.js'
 
 /** Private MCP connection settings. Credentials remain in the local SQLite DB. */
 export class SQLiteMcpServerStorage extends ChaiteStorage {
   constructor (dbPath) {
     super()
-    this.db = new sqlite3.Database(dbPath)
+    this.db = openSQLiteDatabase(dbPath)
   }
 
   getName () { return 'SQLiteMcpServerStorage' }
@@ -39,4 +39,5 @@ export class SQLiteMcpServerStorage extends ChaiteStorage {
   listItems () { return new Promise((resolve, reject) => this.db.all('SELECT payload FROM mcp_servers ORDER BY updatedAt DESC', (err, rows) => err ? reject(err) : resolve(rows.map(row => JSON.parse(row.payload))))) }
   async listItemsByEqFilter (filter) { return (await this.listItems()).filter(item => Object.entries(filter).every(([key, value]) => item[key] === value)) }
   async listItemsByInQuery (query) { return (await this.listItems()).filter(item => query.every(({ field, values }) => values.includes(item[field]))) }
+  close () { return new Promise((resolve, reject) => this.db.close(error => error ? reject(error) : resolve())) }
 }

@@ -39,6 +39,7 @@ import { SQLiteOperationLogStorage } from './storage/sqlite/operation_log_storag
 import { SQLiteMcpServerStorage } from './storage/sqlite/mcp_server_storage.js'
 import { LowDBMcpServerStorage } from './storage/lowdb/mcp_server_storage.js'
 import { createDebugSanitizingLogger } from '../../utils/log.js'
+import { migrateSplitSQLiteDatabases } from './storage/sqlite/split_migrate.js'
 
 /**
  * 认证，以便共享上传
@@ -79,6 +80,8 @@ export async function initChaite () {
   switch (storage) {
     case 'sqlite': {
       const dbPath = path.join(dataDir, 'data.db')
+      const historyDbPath = path.join(dataDir, 'history.db')
+      await migrateSplitSQLiteDatabases(dataDir)
       channelsStorage = new SQLiteChannelStorage(dbPath)
       await channelsStorage.initialize()
       chatPresetsStorage = new SQLiteChatPresetStorage(dbPath)
@@ -95,7 +98,7 @@ export async function initChaite () {
       await triggerStorage.initialize()
       mcpServerStorage = new SQLiteMcpServerStorage(dbPath)
       await mcpServerStorage.initialize()
-      historyStorage = new SQLiteHistoryManager(dbPath, path.join(dataDir, 'images'))
+      historyStorage = new SQLiteHistoryManager(historyDbPath, path.join(dataDir, 'images'))
       await checkMigrate()
       break
     }
@@ -138,7 +141,7 @@ export async function initChaite () {
   let chaite = Chaite.init(channelsManager, toolsManager, processorsManager, chatPresetManager, toolsGroupManager, triggerManager,
     userModeSelector, userStateStorage, historyStorage, chaiteLogger)
   if (storage === 'sqlite') {
-    operationLogStorage = new SQLiteOperationLogStorage(path.join(dataDir, 'data.db'), ChatGPTConfig.chaite.operationLogLimit)
+    operationLogStorage = new SQLiteOperationLogStorage(path.join(dataDir, 'operation_logs.db'), ChatGPTConfig.chaite.operationLogLimit)
     await operationLogStorage.initialize()
     chaite.setOperationLogManager(new OperationLogManager(operationLogStorage))
   }

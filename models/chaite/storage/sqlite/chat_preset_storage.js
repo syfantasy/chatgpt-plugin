@@ -1,5 +1,5 @@
 import { ChaiteStorage, ChatPreset } from 'chaite'
-import sqlite3 from 'sqlite3'
+import { openSQLiteDatabase } from './runtime.js'
 import path from 'path'
 import fs from 'fs'
 import { generateId } from '../../../../utils/common.js'
@@ -38,7 +38,7 @@ export class SQLiteChatPresetStorage extends ChaiteStorage {
         fs.mkdirSync(dir, { recursive: true })
       }
 
-      this.db = new sqlite3.Database(this.dbPath, async (err) => {
+      this.db = openSQLiteDatabase(this.dbPath, async (err) => {
         if (err) {
           return reject(err)
         }

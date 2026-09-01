@@ -91,7 +91,7 @@ memory:
 
 - **basic**：控制触发方式、调试与命令前缀。
 - **llm**：定义默认模型、嵌入模型、群上下文等。`defaultChatPresetId` 需在面板或命令中提前创建。
-- **chaite**：`storage` 默认 SQLite，会在 `plugins/chatgpt-plugin/data/data.db` 生成数据文件；如接入 Chaite Cloud，请填入 `cloudApiKey` 并开放 `host/port`。`publicBaseUrl` 会作为“自定义地址”单独发送；插件还会列出本机网卡内网地址，并通过 ip.sb / ip.me 尝试获取公网 IPv4 / IPv6。
+- **chaite**：`storage` 默认 SQLite。核心配置保存在 `plugins/chatgpt-plugin/data/data.db`，聊天历史和操作日志分别保存在同目录的 `history.db`、`operation_logs.db`；升级时会自动从旧 `data.db` 分批复制数据，并保留旧表作为兼容备份。如接入 Chaite Cloud，请填入 `cloudApiKey` 并开放 `host/port`。`publicBaseUrl` 会作为“自定义地址”单独发送；插件还会列出本机网卡内网地址，并通过 ip.sb / ip.me 尝试获取公网 IPv4 / IPv6。
 - **bym**：配置伪人触发概率、关键词映射、撤回与思考内容开关。
 - **memory**：为群记忆或私人记忆开启检索、模型与提示词，可按需启用 `extensions.simple` 以加载自定义词典。
 
