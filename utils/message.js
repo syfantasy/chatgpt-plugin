@@ -166,14 +166,22 @@ export async function getPreset (e, presetId, toggleMode, togglePrefix) {
   const isValidChat = checkChatMsg(e, toggleMode, togglePrefix)
   const manager = Chaite.getInstance().getChatPresetManager()
   const presets = await manager.getAllPresets()
-  const prefixHitPresets = presets.filter(p => e.msg?.startsWith(p.prefix))
+  const msg = e.msg || ''
+  // 句首命中（无条件）优先；无句首命中时，才允许“面板开启了 prefixMatchAnywhere”的
+  // 预设按“前缀出现在消息任意位置”命中（与 bym.hit 的 includes 语义一致，句首仍优先）。
+  const startHitPresets = presets.filter(p => msg.startsWith(p.prefix))
+  let anywhereHitPresets = []
+  if (startHitPresets.length === 0) {
+    anywhereHitPresets = presets.filter(p => p.prefixMatchAnywhere === true && p.prefix && msg.includes(p.prefix))
+  }
+  const prefixHitPresets = startHitPresets.length > 0 ? startHitPresets : anywhereHitPresets
   if (!isValidChat && prefixHitPresets.length === 0) {
     return null
   }
   let preset
   // 如果不是at且不满足通用前缀，查看是否满足其他预设
   if (!isValidChat) {
-    // 找到其中prefix最长的
+    // 句首/句中各自内部仍取 prefix 最长的那个
     if (prefixHitPresets.length > 1) {
       preset = prefixHitPresets.sort((a, b) => b.prefix.length - a.prefix.length)[0]
     } else {
