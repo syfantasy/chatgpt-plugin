@@ -13,6 +13,7 @@ class ChatGPTConfig {
   }
 
   chaite = {
+    mode: 'auto', // 'auto' (自动探测本地依赖与远程) | 'http' (纯远程桥接) | 'embedded' (强制内嵌)
     url: 'http://127.0.0.1:48370',
     token: '',
     defaultPreset: '',

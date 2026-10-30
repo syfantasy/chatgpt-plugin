@@ -16,6 +16,8 @@ basic:
 
 # Chaite 2.0 后端服务配置
 chaite:
+  # 运行模式：'auto' (自动探测本地依赖与远程) | 'http' (纯远程服务) | 'embedded' (同进程内嵌)
+  mode: 'auto'
   # 服务端监听地址
   url: 'http://127.0.0.1:48370'
   # 管理员授权密码/Token (首次运行并在 Web 设置密码后填入)
