@@ -1,225 +1,159 @@
-import Config from '../config/config.js'
-import { Chaite, SendMessageOption } from 'chaite'
-import { getPreset, intoUserMessage, toYunzai } from '../utils/message.js'
-import { YunzaiUserState } from '../models/chaite/user_state.js'
-import { buildGroupContextMessages, getGroupHistory, loadGroupContextImages } from '../utils/group.js'
-import { buildMemoryPrompt } from '../models/memory/prompt.js'
-import { extractTextFromUserMessage, processUserMemory } from '../models/memory/userMemoryManager.js'
-import { isVisualModelForSendOptions } from '../utils/vision.js'
-import * as crypto from 'node:crypto'
+import plugin from '../../../lib/plugins/plugin.js'
+import ChatGPTConfig from '../config/config.js'
+import { chaiteClient } from '../utils/client.js'
 
-function getEventUserId (e) {
-  const userId = e?.user_id ?? e?.sender?.user_id
-  if (userId === null || userId === undefined) {
-    return ''
-  }
-  return String(userId).trim()
-}
-
-export class Chat extends plugin {
-  constructor () {
+export class ChatGPTChat extends plugin {
+  constructor() {
     super({
-      name: 'ChatGPT-Plugin对话',
-      dsc: 'ChatGPT-Plugin对话',
+      name: 'ChatGPT-对话',
+      dsc: 'Chaite 2.0 智能对话与群聊上下文记录',
       event: 'message',
-      // 应🥑要求降低优先级
-      priority: 555500,
+      priority: 50,
       rule: [
         {
-          reg: '^[^#][sS]*',
-          fnc: 'chat',
-          log: false
-        }
-      ]
+          reg: '.*',
+          fnc: 'recordFlow',
+          log: false,
+        },
+        {
+          reg: '.*',
+          fnc: 'handleChat',
+        },
+      ],
     })
   }
 
-  async chat (e) {
-    if (!Chaite.getInstance()) {
+  /**
+   * 旁路记录群聊流水进 Chaite 双水位线上下文池（绝不拦截其他插件）
+   */
+  async recordFlow() {
+    if (this.e.isGroup) {
+      chaiteClient.recordMessage(this.e).catch(() => {})
+    }
+    return false
+  }
+
+  /**
+   * 对话调度核心
+   */
+  async handleChat() {
+    const e = this.e
+    const cfg = ChatGPTConfig
+
+    // 1. 判断是否命中对话触发条件
+    const trigger = this.checkTrigger(e, cfg)
+    if (!trigger.matched) {
+      // 检查是否命中伪人模式 (bym)
+      if (this.checkBymTrigger(e, cfg)) {
+        return this.doChat(e, e.msg || '', { isBym: true, presetId: cfg.bym.preset })
+      }
       return false
     }
-    const userId = getEventUserId(e)
-    let state = await Chaite.getInstance().getUserStateStorage().getItem(e.sender.user_id + '')
-    if (!state) {
-      state = new YunzaiUserState(e.sender.user_id, e.sender.nickname, e.sender.card)
-      // await Chaite.getInstance().getUserStateStorage().setItem(e.sender.user_id + '', state)
-    }
-    if (!state.current.conversationId) {
-      state.current.conversationId = crypto.randomUUID()
-    }
-    if (!state.current.messageId) {
-      state.current.messageId = crypto.randomUUID()
-    }
-    const preset = await getPreset(e, state?.settings.preset || Config.llm.defaultChatPresetId, Config.basic.toggleMode, Config.basic.togglePrefix)
-    if (!preset) {
-      logger.debug('不满足对话触发条件或未找到预设，不进入对话')
+
+    const prompt = trigger.prompt.trim()
+    if (!prompt && (!e.img || e.img.length === 0)) {
       return false
-    } else {
-      logger.info('进入对话, prompt: ' + e.msg)
-    }
-    const sendMessageOptions = SendMessageOption.create(state?.settings)
-    sendMessageOptions.onMessageWithToolCall = async content => {
-      const { msgs, forward } = await toYunzai(e, [content])
-      if (msgs.length > 0) {
-        await e.reply(msgs)
-      }
-      for (let forwardElement of forward) {
-        this.reply(forwardElement)
-      }
-    }
-    const userMessage = await intoUserMessage(e, {
-      handleReplyText: false,
-      handleReplyImage: true,
-      useRawMessage: false,
-      handleAtMsg: true,
-      excludeAtBot: false,
-      toggleMode: Config.basic.toggleMode,
-      togglePrefix: Config.basic.togglePrefix
-    })
-    const userText = extractTextFromUserMessage(userMessage) || e.msg || ''
-    sendMessageOptions.conversationId = state?.current?.conversationId
-    sendMessageOptions.parentMessageId = state?.current?.messageId || state?.conversations.find(c => c.id === sendMessageOptions.conversationId)?.lastMessageId
-    const disableConversationContext = preset.disableConversationContext === true
-    if (disableConversationContext) {
-      // Keep the conversation ID for display/history grouping, but detach this
-      // turn from the previous branch. The current turn and tool-call rounds
-      // can still build on each other through the new branch.
-      sendMessageOptions.parentMessageId = crypto.randomUUID()
-    }
-    const retainDynamicContextHistory = preset.dynamicContextHistory === 'retain' ||
-      (preset.dynamicContextHistory !== 'discard' && Config.llm.retainDynamicContextHistory === true)
-    if (!disableConversationContext && !retainDynamicContextHistory && sendMessageOptions.parentMessageId) {
-      const historyManager = Chaite.getInstance().getHistoryManager()
-      if (typeof historyManager.removeHistory === 'function') {
-        const previousHistory = await historyManager.getHistory(
-          sendMessageOptions.parentMessageId,
-          sendMessageOptions.conversationId
-        )
-        const staleDynamicContexts = previousHistory.filter(message => message._chatgptDynamicContext === true)
-        for (const message of staleDynamicContexts) {
-          await historyManager.removeHistory(message.id, sendMessageOptions.conversationId)
-        }
-        if (staleDynamicContexts.length > 0) {
-          logger.debug(`[Chat] removed ${staleDynamicContexts.length} stale dynamic context message(s) from history`)
-        }
-      } else {
-        logger.warn('[Chat] current history storage does not support removing stale dynamic context messages')
-      }
-    }
-    // systemOverride 保持静态（仅 baseSystem），动态内容移到独立 user message 中
-    const baseSystem = sendMessageOptions.systemOverride || preset.sendMessageOption?.systemOverride || ''
-    if (baseSystem) {
-      sendMessageOptions.systemOverride = baseSystem
-    }
-    // 思维模型开启思考转发时禁用 streaming（与 bym 模式相同原因）
-    if (Config.bym.sendReasoning && (preset.sendMessageOption?.isThinkingModel || preset.sendMessageOption?.enableReasoning)) {
-      sendMessageOptions.stream = false
-    }
-    // 构建动态上下文（记忆、群聊上下文），拼接到用户消息前面
-    // 将其从 system prompt 中分离，保持 system prompt 静态以利用 LLM prompt cache
-    // 记忆检索和群聊上下文互不依赖，各自都要走网络（embedding / 拉群历史 + 下图），
-    // 所以并发跑。拼装顺序仍然是「记忆 → 群聊 header → 群聊消息」，不受影响。
-    const enableGroupContext = (preset.groupContext === 'use_system' || !preset.groupContext) ? Config.llm.enableGroupContext : (preset.groupContext === 'enabled')
-    const memoryPromise = userText
-      ? buildMemoryPrompt({
-        userId,
-        groupId: e.isGroup ? e.group_id + '' : null,
-        queryText: userText
-      })
-      : Promise.resolve('')
-    const groupContextPromise = (async () => {
-      const includeImages = Config.vision?.enableGroupContextImages !== false &&
-        await isVisualModelForSendOptions(sendMessageOptions, preset)
-      if (!enableGroupContext || !e.isGroup) {
-        return { includeImages, groupContext: null }
-      }
-      const groupContext = await buildGroupContextMessages(
-        e,
-        Config.llm.groupContextLength,
-        {
-          groupContextTemplatePrefix: Config.llm.groupContextTemplatePrefix,
-          groupContextTemplateMessage: Config.llm.groupContextTemplateMessage,
-          groupContextTemplateSuffix: Config.llm.groupContextTemplateSuffix
-        },
-        getGroupHistory,
-        { includeImages }
-      )
-      return { includeImages, groupContext }
-    })()
-    const [memoryPrompt, { includeImages: includeGroupContextImages, groupContext }] =
-      await Promise.all([memoryPromise, groupContextPromise])
-
-    const contextSegments = []
-    const contextImages = []
-    if (memoryPrompt) {
-      contextSegments.push(memoryPrompt)
-      logger.debug(`[Memory] memory prompt: ${memoryPrompt}`)
-    }
-    if (groupContext?.messages.length) {
-      if (groupContext.header) {
-        contextSegments.push(groupContext.header)
-      }
-      if (includeGroupContextImages) {
-        contextImages.push(...await loadGroupContextImages(groupContext.messages))
-      }
-      contextSegments.push(groupContext.messages.map(m => m.text).join('\n'))
     }
 
-    // 上下文（记忆 + 群聊 header + 群聊消息 + 图片）作为一条独立 user 消息，
-    // 插入到已有对话历史和本轮用户消息之间
-    if (contextSegments.length > 0 || contextImages.length > 0) {
-      const contextText = contextSegments.join('\n\n')
-      const contextContent = []
-      if (contextText) contextContent.push({ type: 'text', text: contextText })
-      contextContent.push(...contextImages)
-      const contextMsg = {
-        id: crypto.randomUUID(),
-        parentId: sendMessageOptions.parentMessageId,
-        role: 'user',
-        content: contextContent,
-        // Internal marker: allows a future turn to discard this transient
-        // group/time/memory context without removing actual conversation turns.
-        _chatgptDynamicContext: true
+    return this.doChat(e, prompt, {})
+  }
+
+  /**
+   * 执行对话请求并响应
+   */
+  async doChat(e, prompt, options = {}) {
+    try {
+      const response = await chaiteClient.chat(e, prompt, options)
+      if (!response || (!response.text && (!response.images || response.images.length === 0))) {
+        return true
       }
-      await Chaite.getInstance().getHistoryManager().saveHistory(contextMsg, sendMessageOptions.conversationId)
-      sendMessageOptions.parentMessageId = contextMsg.id
+
+      const replyItems = []
+
+      // 文本回复
+      if (response.text) {
+        replyItems.push(response.text)
+      }
+
+      // 附加图片回复
+      if (Array.isArray(response.images)) {
+        for (const img of response.images) {
+          if (typeof img === 'string') {
+            if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('base64://')) {
+              replyItems.push(segment.image(img))
+            } else if (img.startsWith('data:image/')) {
+              replyItems.push(segment.image(img))
+            }
+          }
+        }
+      }
+
+      // 发送回复
+      if (replyItems.length === 1 && typeof replyItems[0] === 'string') {
+        await e.reply(replyItems[0], true)
+      } else if (replyItems.length > 0) {
+        await e.reply(replyItems, true)
+      }
+
+      return true
+    } catch (err) {
+      logger.error('[ChatGPT-Plugin] 对话异常:', err?.message || err)
+      if (ChatGPTConfig.basic.debug) {
+        await e.reply(`[Chaite 响应错误] ${err?.message || '未知错误'}`)
+      }
+      return true
     }
-    const response = await Chaite.getInstance().sendMessage(userMessage, e, {
-      ...sendMessageOptions,
-      chatPreset: preset
-    })
-    // 更新当前聊天进度
-    state.current.messageId = response.id
-    const conversations = state.conversations
-    if (conversations.find(c => c.id === sendMessageOptions.conversationId)) {
-      conversations.find(c => c.id === sendMessageOptions.conversationId).lastMessageId = response.id
-    } else {
-      conversations.push({
-        id: sendMessageOptions.conversationId,
-        lastMessageId: response.id,
-        // todo
-        name: 'New Conversation'
-      })
+  }
+
+  /**
+   * 触发检测逻辑
+   */
+  checkTrigger(e, cfg) {
+    let msg = (e.msg || '').trim()
+
+    // 私聊直接触发
+    if (e.isPrivate) {
+      return { matched: true, prompt: msg }
     }
-    await Chaite.getInstance().getUserStateStorage().setItem(e.sender.user_id + '', state)
-    const { msgs, forward } = await toYunzai(e, response.contents)
-    if (msgs.length > 0) {
-      await e.reply(msgs, true)
-    }
-    // 与 bym 模式共用 sendReasoning 开关
-    if (Config.bym.sendReasoning) {
-      for (let forwardElement of forward) {
-        this.reply(forwardElement)
+
+    const mode = cfg.basic.toggleMode || 'at'
+    const prefix = cfg.basic.togglePrefix || '#chat'
+
+    // @Bot 模式
+    if (mode === 'at' || mode === 'both') {
+      if (e.atBot) {
+        return { matched: true, prompt: msg }
       }
     }
-    // 异步提取记忆，不阻塞消息回复
-    processUserMemory({
-      event: e,
-      userMessage,
-      userText,
-      conversationId: sendMessageOptions.conversationId,
-      assistantContents: response.contents,
-      assistantMessageId: response.id
-    }).catch(err => logger.warn('[Memory] user memory extraction failed:', err.message))
+
+    // 前缀模式
+    if (mode === 'prefix' || mode === 'both') {
+      if (msg.startsWith(prefix)) {
+        const prompt = msg.slice(prefix.length).trim()
+        return { matched: true, prompt }
+      }
+    }
+
+    return { matched: false, prompt: '' }
+  }
+
+  /**
+   * 伪人模式检测
+   */
+  checkBymTrigger(e, cfg) {
+    if (!cfg.bym.enable || !e.isGroup) return false
+    const msg = e.msg || ''
+
+    // 必中词
+    if (Array.isArray(cfg.bym.hit) && cfg.bym.hit.some((kw) => kw && msg.includes(kw))) {
+      return true
+    }
+
+    // 概率触发
+    if (cfg.bym.probability > 0 && Math.random() < cfg.bym.probability) {
+      return true
+    }
+
+    return false
   }
 }

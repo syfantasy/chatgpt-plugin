@@ -1,66 +1,115 @@
 import Config from './config/config.js'
-// 支持锅巴
-export function supportGuoba () {
+
+export function supportGuoba() {
   return {
-    // 插件信息，将会显示在前端页面
-    // 如果你的插件没有在插件库里，那么需要填上补充信息
-    // 如果存在的话，那么填不填就无所谓了，填了就以你的信息为准
     pluginInfo: {
       name: 'chatgpt-plugin',
-      title: 'ChatGPT-Plugin',
-      author: '@ikechan8370',
-      authorLink: 'https://github.com/ikechan8370',
-      link: 'https://github.com/ikechan8370/chatgpt-plugin',
-      isV3: true,
-      isV2: false,
-      description: '基于OpenAI最新推出的chatgpt和微软的 New bing通过api进行聊天的插件，需自备openai账号或有New bing访问权限的必应账号',
-      // 显示图标，此为个性化配置
-      // 图标可在 https://icon-sets.iconify.design 这里进行搜索
+      title: 'ChatGPT-Plugin (Chaite 2.0)',
+      author: '@syfantasy',
+      authorLink: 'https://github.com/syfantasy',
+      link: 'https://github.com/syfantasy/chatgpt-plugin',
+      isV3: false,
+      isV4: true,
+      description: '基于 Chaite 2.0 智能体架构的 Yunzai-Bot 极轻量对话与管理插件',
       icon: 'simple-icons:openai',
-      // 图标颜色，例：#FF0000 或 rgb(255, 0, 0)
-      iconColor: '#00c3ff'
+      iconColor: '#10a37f',
     },
-    // 配置项信息
     configInfo: {
-      // 配置项 schemas
       schemas: [
         {
-          field: 'testRender',
-          label: '表格测试',
-          component: 'Render',
-          render: () => {
-            `<span>你好</span>`
-          }
-        }
+          field: 'basic.toggleMode',
+          label: '对话触发模式',
+          bottomHelpMessage: '设置在群聊中触发机器人对话的方式',
+          component: 'Select',
+          componentProps: {
+            options: [
+              { label: '@机器人 触发 (at)', value: 'at' },
+              { label: '指定前缀触发 (prefix)', value: 'prefix' },
+              { label: '二者皆可 (both)', value: 'both' },
+            ],
+          },
+        },
+        {
+          field: 'basic.togglePrefix',
+          label: '对话触发前缀',
+          bottomHelpMessage: '前缀触发模式下识别的起始字符',
+          component: 'Input',
+        },
+        {
+          field: 'basic.commandPrefix',
+          label: '指令命令前缀',
+          bottomHelpMessage: '管理指令识别前缀，默认为 #chatgpt',
+          component: 'Input',
+        },
+        {
+          field: 'basic.enableGroupContext',
+          label: '自动记录群聊流水',
+          bottomHelpMessage: '开启后将群消息旁路同步至 Chaite 建立带流动序号和花名册的上下文',
+          component: 'Switch',
+        },
+        {
+          field: 'chaite.url',
+          label: 'Chaite 服务端地址',
+          bottomHelpMessage: '新版 Chaite 2.0 服务端监听地址，默认 http://127.0.0.1:48370',
+          component: 'Input',
+        },
+        {
+          field: 'chaite.token',
+          label: 'Chaite 管理密码 / Token',
+          bottomHelpMessage: 'Chaite 控制台的访问密码或 Bearer Token',
+          component: 'InputPassword',
+        },
+        {
+          field: 'chaite.defaultPreset',
+          label: '默认预设 ID',
+          bottomHelpMessage: '留空则使用 Chaite 端内默认配置预设',
+          component: 'Input',
+        },
+        {
+          field: 'bym.enable',
+          label: '伪人插话模式',
+          bottomHelpMessage: '结合上下文自发参与群聊插话',
+          component: 'Switch',
+        },
+        {
+          field: 'bym.probability',
+          label: '伪人随机触发概率',
+          bottomHelpMessage: '0 ~ 1 之间的小数，如 0.02 表示 2% 概率',
+          component: 'InputNumber',
+          componentProps: {
+            min: 0,
+            max: 1,
+            step: 0.01,
+          },
+        },
       ],
-      // 获取配置数据方法（用于前端填充显示数据）
-      getConfigData () {
-        return Config
-      },
-      // 设置配置的方法（前端点确定后调用的方法）
-      setConfigData (data, { Result }) {
-        for (let [keyPath, value] of Object.entries(data)) {
-          // 处理黑名单
-          if (keyPath === 'blockWords' || keyPath === 'promptBlockWords' || keyPath === 'initiativeChatGroups') { value = value.toString().split(/[,，;；\|]/) }
-          if (keyPath === 'blacklist' || keyPath === 'whitelist') {
-            // 6-10位数的群号或qq
-            const regex = /^\^?[1-9]\d{5,9}(\^[1-9]\d{5,9})?$/
-            const inputSet = new Set()
-            value = value.toString().split(/[,，;；|\s]/).reduce((acc, item) => {
-              item = item.trim()
-              if (!inputSet.has(item) && regex.test(item)) {
-                if (item.length <= 11 || (item.length <= 21 && item.length > 11 && !item.startsWith('^'))) {
-                  inputSet.add(item)
-                  acc.push(item)
-                }
-              }
-              return acc
-            }, [])
-          }
-          if (Config[keyPath] !== value) { Config[keyPath] = value }
+      getConfigData() {
+        return {
+          'basic.toggleMode': Config.basic.toggleMode,
+          'basic.togglePrefix': Config.basic.togglePrefix,
+          'basic.commandPrefix': Config.basic.commandPrefix,
+          'basic.enableGroupContext': Config.basic.enableGroupContext,
+          'chaite.url': Config.chaite.url,
+          'chaite.token': Config.chaite.token,
+          'chaite.defaultPreset': Config.chaite.defaultPreset,
+          'bym.enable': Config.bym.enable,
+          'bym.probability': Config.bym.probability,
         }
-        return Result.ok({}, '保存成功~')
-      }
-    }
+      },
+      setConfigData(data, { Result }) {
+        if (data['basic.toggleMode'] !== undefined) Config.basic.toggleMode = data['basic.toggleMode']
+        if (data['basic.togglePrefix'] !== undefined) Config.basic.togglePrefix = data['basic.togglePrefix']
+        if (data['basic.commandPrefix'] !== undefined) Config.basic.commandPrefix = data['basic.commandPrefix']
+        if (data['basic.enableGroupContext'] !== undefined) Config.basic.enableGroupContext = data['basic.enableGroupContext']
+        if (data['chaite.url'] !== undefined) Config.chaite.url = data['chaite.url']
+        if (data['chaite.token'] !== undefined) Config.chaite.token = data['chaite.token']
+        if (data['chaite.defaultPreset'] !== undefined) Config.chaite.defaultPreset = data['chaite.defaultPreset']
+        if (data['bym.enable'] !== undefined) Config.bym.enable = data['bym.enable']
+        if (data['bym.probability'] !== undefined) Config.bym.probability = data['bym.probability']
+
+        Config.saveToFile()
+        return Result.ok({}, 'Chaite 配置保存成功！')
+      },
+    },
   }
 }

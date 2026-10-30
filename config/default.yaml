@@ -1,0 +1,38 @@
+# Chaite 2.0 Client Plugin for Yunzai-Bot
+version: '4.0.0'
+
+# 基础触发行为设置
+basic:
+  # 对话触发方式：'at' (仅@机器人), 'prefix' (仅前缀), 'both' (两者均可)
+  toggleMode: 'at'
+  # 前缀触发关键词
+  togglePrefix: '#chat'
+  # 管理指令前缀
+  commandPrefix: '#chatgpt'
+  # 自动同步群聊流水进 Chaite 双水位线上下文池
+  enableGroupContext: true
+  # 调试日志输出
+  debug: false
+
+# Chaite 2.0 后端服务配置
+chaite:
+  # 服务端监听地址
+  url: 'http://127.0.0.1:48370'
+  # 管理员授权密码/Token (首次运行并在 Web 设置密码后填入)
+  token: ''
+  # 默认使用的对话预设 ID (留空使用 Chaite 默认预设)
+  defaultPreset: ''
+  # 请求超时时间 (毫秒)
+  timeout: 120000
+
+# 伪人插话设置
+bym:
+  # 是否开启伪人模式
+  enable: false
+  # 必定触发关键词
+  hit:
+    - 'bym'
+  # 群聊无关键词时随机插话概率 (0.02 表示 2%)
+  probability: 0.02
+  # 伪人模式专用的预设 ID (留空使用默认)
+  preset: ''

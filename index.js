@@ -1,57 +1,50 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import ChatGPTConfig from './config/config.js'
-import { initChaite } from './models/chaite/cloud.js'
-import { visionService } from './utils/vision.js'
-import { reportRetentionOpportunity } from './models/chaite/historyRetention.js'
-logger.info('**************************************')
-logger.info('chatgpt-plugin加载中')
+import { chaiteClient } from './utils/client.js'
+
+logger.info('======================================')
+logger.info(`[ChatGPT-Plugin] Chaite 2.0 适配器加载中... (v${ChatGPTConfig.version})`)
 
 if (!global.segment) {
   try {
     global.segment = (await import('icqq')).segment
   } catch (err) {
-    global.segment = (await import('oicq')).segment
+    try {
+      global.segment = (await import('oicq')).segment
+    } catch {}
   }
 }
 
-const files = fs.readdirSync('./plugins/chatgpt-plugin/apps').filter(file => file.endsWith('.js'))
+const appsDir = './plugins/chatgpt-plugin/apps'
+const files = fs.existsSync(appsDir)
+  ? fs.readdirSync(appsDir).filter((file) => file.endsWith('.js'))
+  : ['chat.js', 'management.js', 'update.js']
 
-let ret = []
+const ret = await Promise.allSettled(files.map((file) => import(`./apps/${file}`)))
 
-files.forEach((file) => {
-  ret.push(import(`./apps/${file}`))
-})
-
-ret = await Promise.allSettled(ret)
-
-let apps = {}
-for (let i in files) {
-  let name = files[i].replace('.js', '')
+const apps = {}
+for (let i = 0; i < files.length; i++) {
+  const name = files[i].replace('.js', '')
   if (ret[i].status !== 'fulfilled') {
-    logger.error(`载入插件错误：${logger.red(name)}`)
+    logger.error(`[ChatGPT-Plugin] 载入模块错误: ${name}`)
     logger.error(ret[i].reason)
     continue
   }
   apps[name] = ret[i].value[Object.keys(ret[i].value)[0]]
 }
-global.chatgpt = {
 
-}
+// 异步检测 Chaite 服务健康状态并打出提示
+chaiteClient
+  .getStatus()
+  .then(() => {
+    logger.info(`[ChatGPT-Plugin] Chaite 服务连接成功: ${ChatGPTConfig.chaite.url}`)
+  })
+  .catch(() => {
+    logger.warn(`[ChatGPT-Plugin] 警告: 无法连接至 Chaite 服务 (${ChatGPTConfig.chaite.url})，请确认 Chaite 是否已启动。`)
+  })
 
-ChatGPTConfig.startSync('./plugins/chatgpt-plugin/data')
-visionService.startCleanupScheduler()
-// 只执行一次：从旧版本升级上来时提示一次可清理的历史。放在这里而不是插件构造
-// 函数里，因为 Yunzai 每条消息都会 new 一次插件类。
-initChaite()
-  .then(() => reportRetentionOpportunity()
-    // 只吞掉提示本身的异常，不要把 initChaite 的失败也一起吞了——
-    // 那会让"chaite 没起来"变成一条 debug 日志，然后所有对话静默地不响应。
-    .catch(err => logger.debug?.(`[History] retention notice skipped: ${err?.message || err}`)))
-logger.info('chatgpt-plugin加载成功')
-logger.info(`当前版本${ChatGPTConfig.version}`)
-logger.info('仓库地址 https://github.com/ikechan8370/chatgpt-plugin')
-logger.info('文档地址 https://www.yunzai.chat')
-logger.info('插件群号 559567232')
-logger.info('**************************************')
+logger.info(`[ChatGPT-Plugin] 加载完毕 | 触发模式: ${ChatGPTConfig.basic.toggleMode} | 默认预设: ${ChatGPTConfig.chaite.defaultPreset || '默认'}`)
+logger.info('======================================')
 
 export { apps }
