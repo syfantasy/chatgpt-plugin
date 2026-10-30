@@ -26,7 +26,12 @@ export class ChaiteClient {
       const mod = await import('chaite')
       if (mod && mod.handleMessage && mod.groupHistoryBuffer) {
         this.embeddedModule = mod
-        if (mod.initChaiteStorage) {
+        if (mod.bootstrap) {
+          // 内嵌模式下拉起整套 Chaite 运行时（包含 Web 管理控制台与数据库）
+          mod.bootstrap().catch((err) => {
+            console.error('[ChatGPT-Plugin] Chaite 内嵌服务启动异常:', err)
+          })
+        } else if (mod.initChaiteStorage) {
           this.storageCtx = await mod.initChaiteStorage()
         }
         return true
@@ -204,6 +209,13 @@ export class ChaiteClient {
     if (await this.checkEmbedded()) {
       const cfg = ChatGPTConfig.chaite
       const base = hostOverride || (cfg.url || 'http://127.0.0.1:48370').replace(/\/+$/, '')
+      try {
+        if (this.embeddedModule?.FrontEndAuthHandler && this.embeddedModule?.Chaite) {
+          const authKey = this.embeddedModule.Chaite.getInstance?.().getGlobalConfig?.()?.getAuthKey?.() || 'chaite-key'
+          const token = this.embeddedModule.FrontEndAuthHandler.generateJWT(authKey)
+          return `${base}/#/?token=${encodeURIComponent(token)}`
+        }
+      } catch {}
       return `${base}/#/`
     }
 
