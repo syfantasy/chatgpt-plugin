@@ -1,6 +1,7 @@
 // modified from StarRail-plugin | 已经过StarRail-plugin作者本人同意
 import plugin from '../../../lib/plugins/plugin.js'
 import { createRequire } from 'module'
+import axios from 'axios'
 import _ from 'lodash'
 import { Restart } from '../../other/restart.js'
 import ChatGPTConfig from '../config/config.js'
@@ -87,27 +88,42 @@ export class Update extends plugin {
         return false
       }
 
-      // Check if pnpm is available
-      let packageManager = await this.checkPnpm()
-      await this.reply(`正在使用 ${packageManager} 更新 chaite 依赖...`)
-      let npmRet = await this.execSync(`cd ./plugins/chatgpt-plugin/ && ${packageManager} update chaite`)
-      logger.info(JSON.stringify(npmRet))
-      if (npmRet.error) {
+      // chaite 依赖更新：优先交给 chaite 自己处理。
+      // 与面板「一键检查并更新」、#chaite更新 走完全同一套流程：
+      // 比对远端 commit -> 自动补 allowBuilds -> 安装后回读锁文件校验 -> 自己派生新进程重启。
+      const chaite = await this.updateChaiteDependency()
+      if (!chaite.ok) {
         logger.mark(`${this.e.logFnc} 更新失败：chaite 依赖`)
-        await this.reply(`chaite 依赖更新失败：\n${npmRet.error.toString()}`)
+        await this.reply(`chaite 依赖更新失败：\n${chaite.message}`)
+        if (chaite.detail) logger.error(`[chatgpt更新] ${chaite.detail}`)
         return false
       }
+
       /** 获取插件提交的最新时间 */
       let time = await this.getTime('chatgpt-plugin')
+
+      if (chaite.changed) {
+        // chaite 会在约 1.5 秒后自行重启（内部已 spawn 新进程），这里不能再触发插件重启，
+        // 否则两个重启流程会互相抢端口
+        const pluginUpdated = !/(Already up[ -]to[ -]date|已经是最新的)/.test(ret.stdout || '')
+        await this.reply(
+          `${chaite.message || 'chaite 依赖已更新，正在自动重启...'}` +
+          (pluginUpdated ? '\nchatgpt-plugin 也已同步更新' : '') +
+          (chaite.command ? `\n执行：${chaite.command}` : '')
+        )
+        logger.mark(`${this.e.logFnc} chaite 依赖已更新，等待 chaite 自动重启`)
+        this.isUp = false
+        return true
+      }
 
       if (/(Already up[ -]to[ -]date|已经是最新的)/.test(ret.stdout)) {
         await this.reply(`chatgpt-plugin已经是最新版本\n最后更新时间：${time}`)
       } else {
         let updateMsg = `chatgpt-plugin\n最后更新时间：${time}`
 
-        // Add npm update information if available
-        if (npmRet.stdout.includes('chaite')) {
-          updateMsg += `\n已使用${packageManager}更新chaite依赖`
+        // 回退到本地包管理器时，补充说明 chaite 也是走 pnpm 更新的
+        if (chaite.legacyNote) {
+          updateMsg += `\n已使用${chaite.legacyNote}更新chaite依赖`
         }
 
         await this.reply(updateMsg)
@@ -126,6 +142,61 @@ export class Update extends plugin {
       return false
     } finally {
       uping = false
+    }
+  }
+
+  /**
+   * 更新 chaite 依赖：优先调用 chaite 自己的 /api/system/update，
+   * 老版本（无该接口）或服务未启动时，回退到包管理器直接更新。
+   * @returns {Promise<{ok: boolean, changed: boolean, message: string, detail?: string, legacyNote?: string}>}
+   */
+  async updateChaiteDependency () {
+    const conf = ChatGPTConfig.chaite || {}
+    const base = String(conf.url || '').replace(/\/+$/, '')
+
+    if (base) {
+      try {
+        const res = await axios.post(`${base}/api/system/update`, {}, {
+          timeout: 10 * 60 * 1000,
+          headers: conf.token ? { Authorization: `Bearer ${conf.token}` } : {},
+          validateStatus: () => true
+        })
+        const body = res.data || {}
+        const data = body.data || {}
+        if (res.status < 400 && (body.code === 0 || body.success === true)) {
+          logger.mark(`[chatgpt更新] chaite: ${data.message || '已完成'}`)
+          if (data.log) logger.info(`[chatgpt更新] ${data.log}`)
+          return {
+            ok: true,
+            changed: Boolean(data.hasUpdate),
+            message: data.message || '',
+            command: data.command || '',
+            detail: data.log || ''
+          }
+        }
+        return {
+          ok: false,
+          message: data.message || body.message || `chaite 接口返回 HTTP ${res.status}`,
+          detail: data.log || ''
+        }
+      } catch (err) {
+        logger.warn(`[chatgpt更新] 调用 chaite 更新接口失败，回退本地包管理器：${err?.message || err}`)
+      }
+    }
+
+    // 回退：老版本 chaite 没有该接口，或本地服务未启动
+    const packageManager = await this.checkPnpm()
+    await this.reply(`正在使用 ${packageManager} 更新 chaite 依赖...`)
+    const ret = await this.execSync(`cd ./plugins/chatgpt-plugin/ && ${packageManager} update chaite`)
+    logger.info(JSON.stringify(ret))
+    if (ret.error) {
+      return { ok: false, message: ret.error.toString(), detail: '' }
+    }
+    return {
+      ok: true,
+      changed: false,
+      message: ret.stdout || '',
+      legacyNote: (ret.stdout || '').includes('chaite') ? packageManager : ''
     }
   }
 
