@@ -124,6 +124,10 @@ export class ChaiteClient {
         client: virtualAdapter,
         sender: e.sender,
         presetId: options.presetId || ChatGPTConfig.chaite.defaultPreset || undefined,
+        // handleMessage 及其错误分支通过 event.reply 发送回复，必须收集到 replies
+        reply: async (msg) => {
+          replies.push(msg)
+        },
       }
 
       const storageCtx = this.storageCtx || (await this.embeddedModule.initChaiteStorage?.())
@@ -131,13 +135,21 @@ export class ChaiteClient {
 
       let replyText = ''
       const images = []
+      const appendSegment = (seg) => {
+        if (seg?.type === 'text' && seg.data?.text) replyText += (replyText ? '\n' : '') + seg.data.text
+        if (seg?.type === 'image' && seg.data?.file) images.push(seg.data.file)
+      }
       for (const rep of replies) {
         if (typeof rep === 'string') {
           replyText += (replyText ? '\n' : '') + rep
         } else if (Array.isArray(rep)) {
-          for (const seg of rep) {
-            if (seg.type === 'text') replyText += seg.data?.text || ''
-            if (seg.type === 'image' && seg.data?.file) images.push(seg.data.file)
+          for (const seg of rep) appendSegment(seg)
+        } else if (rep && typeof rep === 'object') {
+          // chaite 主流程的回复约定是 event.reply({ text, reply })，必须处理对象形态
+          if (typeof rep.text === 'string' && rep.text) {
+            replyText += (replyText ? '\n' : '') + rep.text
+          } else if (rep.type) {
+            appendSegment(rep)
           }
         }
       }
@@ -234,6 +246,64 @@ export class ChaiteClient {
     }
     const res = await this.http.get('/api/bridge/status')
     return res.data?.data || res.data
+  }
+
+  /**
+   * 获取预设触发词列表（60s 缓存）
+   * @returns [{ presetId, prefixes: string[], prefixAnywhere: boolean }]
+   */
+  async getPresetTriggers() {
+    if (this._triggerCache && Date.now() - this._triggerCacheAt < 60000) {
+      return this._triggerCache
+    }
+    let items = []
+    if (await this.checkEmbedded()) {
+      try {
+        const storageCtx = globalThis.chaiteStorageCtx || this.storageCtx
+        const presets = (await storageCtx?.presetManager?.listInstances?.()) || []
+        items = presets
+          .map(p => ({
+            presetId: p.id,
+            prefixes: Array.isArray(p.prefixes) && p.prefixes.length > 0
+              ? p.prefixes.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim())
+              : (typeof p.prefix === 'string' && p.prefix.trim() ? [p.prefix.trim()] : []),
+            prefixAnywhere: p.prefixAnywhere !== false,
+          }))
+          .filter(x => x.prefixes.length > 0)
+      } catch {}
+    } else {
+      try {
+        const res = await this.http.get('/api/bridge/preset-triggers')
+        items = res.data?.data?.items || []
+      } catch {}
+    }
+    this._triggerCache = items
+    this._triggerCacheAt = Date.now()
+    return items
+  }
+
+  /**
+   * 按预设触发词匹配消息（最长前缀优先，尊重"任意位置匹配"开关）
+   * @returns { presetId, prompt } 或 null
+   */
+  async matchPresetTrigger(text) {
+    const msg = String(text || '').trim()
+    if (!msg) return null
+    const items = await this.getPresetTriggers().catch(() => [])
+    const flat = []
+    for (const item of items) {
+      for (const prefix of item.prefixes || []) {
+        flat.push({ prefix, presetId: item.presetId, anywhere: item.prefixAnywhere !== false })
+      }
+    }
+    flat.sort((a, b) => b.prefix.length - a.prefix.length)
+    for (const t of flat) {
+      const hit = t.anywhere ? msg.includes(t.prefix) : msg.startsWith(t.prefix)
+      if (hit) {
+        return { presetId: t.presetId, prompt: msg }
+      }
+    }
+    return null
   }
 
   /**

@@ -43,6 +43,14 @@ export class ChatGPTChat extends plugin {
     // 1. 判断是否命中对话触发条件
     const trigger = this.checkTrigger(e, cfg)
     if (!trigger.matched) {
+      // 1.1 预设触发词：命中 Chaite 面板中配置的预设前缀（如 xsy）直接唤醒
+      //     （prompt 传原始消息，由 Chaite 内部完成前缀剥离与预设选择）
+      if (e.msg && e.msg.trim()) {
+        const presetHit = await chaiteClient.matchPresetTrigger(e.msg).catch(() => null)
+        if (presetHit) {
+          return this.doChat(e, e.msg.trim(), { presetId: presetHit.presetId })
+        }
+      }
       // 检查是否命中伪人模式 (bym)
       if (this.checkBymTrigger(e, cfg)) {
         return this.doChat(e, e.msg || '', { isBym: true, presetId: cfg.bym.preset })
