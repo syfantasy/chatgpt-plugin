@@ -310,6 +310,68 @@ export class ChaiteClient {
   }
 
   /**
+   * 获取 Chaite 指令注册表（60s 缓存）。
+   * 指令单一来源在 Chaite（src/commands.ts），宿主不再各自硬编码。
+   */
+  async getCommands() {
+    const now = Date.now()
+    if (this._cmdCache && now - this._cmdCacheAt < 60000) return this._cmdCache
+    let registry = null
+
+    if (await this.checkEmbedded()) {
+      const m = this.embeddedModule
+      if (m?.CHAITE_COMMANDS) {
+        const prefix = m.getConfig?.()?.chat?.commandPrefix || '#'
+        registry = { prefix, commands: m.CHAITE_COMMANDS }
+      }
+    }
+    if (!registry) {
+      try {
+        const res = await this.http.get('/api/bridge/commands')
+        const data = res.data?.data || res.data
+        if (Array.isArray(data?.commands)) registry = data
+      } catch {}
+    }
+    if (!registry) return { prefix: '#', commands: [] }
+
+    this._cmdCache = registry
+    this._cmdCacheAt = now
+    return registry
+  }
+
+  /**
+   * 匹配一条消息是否为 Chaite 注册表内的指令。
+   * 命中返回 { command, alias, arg }，未命中返回 null。
+   * 内嵌模式直接复用 Chaite 的匹配器，保证与 Chaite 分发行为完全一致。
+   */
+  async matchCommand(text) {
+    const msg = String(text || '').trim()
+    if (!msg) return null
+
+    if (await this.checkEmbedded()) {
+      const m = this.embeddedModule
+      if (m?.matchChaiteCommand) {
+        const prefix = m.getConfig?.()?.chat?.commandPrefix || '#'
+        return m.matchChaiteCommand(msg, prefix)
+      }
+    }
+
+    const { prefix, commands } = await this.getCommands()
+    for (const cmd of commands) {
+      for (const alias of cmd.aliases || []) {
+        for (const p of Array.from(new Set([prefix, '#']))) {
+          const base = `${p}${alias}`
+          if (msg === base) return { command: cmd, alias, arg: '' }
+          if (cmd.hasArgs && (msg.startsWith(`${base} `) || msg.startsWith(`${base}\n`))) {
+            return { command: cmd, alias, arg: msg.slice(base.length).trim() }
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  /**
    * 把 Yunzai 的 message 数组或原生片段转为 OneBot/CQ 规范格式
    */
   formatYunzaiMessageSegments(e) {
