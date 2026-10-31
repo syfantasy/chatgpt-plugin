@@ -1,5 +1,24 @@
 import axios from 'axios'
 import ChatGPTConfig from '../config/config.js'
+import cfg from '../../../lib/config/config.js'
+
+/** 机器人自身 QQ 号：优先事件自带 self_id，其次全局 Bot.uin（多账号时取第一个） */
+function getBotUin (e) {
+  const uin = e?.self_id
+    || (Array.isArray(global.Bot?.uin) ? global.Bot.uin[0] : global.Bot?.uin)
+    || ''
+  return uin ? String(uin) : ''
+}
+
+/** Yunzai 配置的主人 QQ 列表（other.yaml masterQQ），透传给 chaite 作为默认主人 */
+function getYunzaiMasters () {
+  try {
+    const list = cfg?.masterQQ || []
+    return (Array.isArray(list) ? list : [list]).map(String).filter(Boolean)
+  } catch {
+    return []
+  }
+}
 
 export class ChaiteClient {
   static instance = null
@@ -99,8 +118,9 @@ export class ChaiteClient {
     // 1. 本地依赖嵌入模式
     if (await this.checkEmbedded()) {
       const replies = []
+      const botUin = getBotUin(e)
       const virtualAdapter = {
-        getSelfId: () => 0,
+        getSelfId: () => botUin || 0,
         sendGroupMsg: async (_gid, msg) => replies.push(msg),
         sendPrivateMsg: async (_uid, msg) => replies.push(msg),
       }
@@ -115,6 +135,9 @@ export class ChaiteClient {
           message_type: e.isGroup ? 'group' : 'private',
           group_id: e.isGroup ? e.group_id : undefined,
           user_id: e.user_id || e.sender?.user_id,
+          // 宿主运行时身份：chaite 面板未配置 botUin/masterUsers 时以这两项为默认
+          self_id: botUin,
+          masters: getYunzaiMasters(),
           message_id: e.message_id,
           raw_message: e.raw_message || prompt,
           message: this.formatYunzaiMessageSegments(e),
@@ -173,6 +196,9 @@ export class ChaiteClient {
         message_type: e.isGroup ? 'group' : 'private',
         group_id: e.isGroup ? e.group_id : undefined,
         user_id: e.user_id || e.sender?.user_id,
+        // 宿主运行时身份：chaite 面板未配置 botUin/masterUsers 时以这两项为默认
+        self_id: getBotUin(e),
+        masters: getYunzaiMasters(),
         message_id: e.message_id,
         time: e.time || Math.floor(Date.now() / 1000),
         raw_message: e.raw_message || e.msg || prompt,
