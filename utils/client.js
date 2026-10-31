@@ -130,7 +130,14 @@ export class ChaiteClient {
         },
       }
 
-      const storageCtx = this.storageCtx || (await this.embeddedModule.initChaiteStorage?.())
+      // 优先复用 bootstrap() 建好的存储上下文（getStorageContext / globalThis 兜底），
+      // 绝不能每次对话都 initChaiteStorage()——那会整层重建驱动与管理器（日志里
+      // 反复出现的 "[Storage] initialized successfully" 就是它）
+      const storageCtx =
+        this.storageCtx ||
+        this.embeddedModule.getStorageContext?.() ||
+        globalThis.chaiteStorageCtx ||
+        (await this.embeddedModule.initChaiteStorage?.())
       await this.embeddedModule.handleMessage(chaiteEvent, storageCtx)
 
       let replyText = ''
