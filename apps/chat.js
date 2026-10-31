@@ -96,11 +96,12 @@ export class ChatGPTChat extends plugin {
         }
       }
 
-      // 发送回复
+      // 发送回复（是否引用由 chaite 预设的 quoteReply 决定，不再硬编码引用）
+      const quote = !!response.quote
       if (replyItems.length === 1 && typeof replyItems[0] === 'string') {
-        await e.reply(replyItems[0], true)
+        await e.reply(replyItems[0], quote)
       } else if (replyItems.length > 0) {
-        await e.reply(replyItems, true)
+        await e.reply(replyItems, quote)
       }
 
       return true

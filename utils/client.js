@@ -135,6 +135,7 @@ export class ChaiteClient {
 
       let replyText = ''
       const images = []
+      let quote = false
       const appendSegment = (seg) => {
         if (seg?.type === 'text' && seg.data?.text) replyText += (replyText ? '\n' : '') + seg.data.text
         if (seg?.type === 'image' && seg.data?.file) images.push(seg.data.file)
@@ -146,6 +147,7 @@ export class ChaiteClient {
           for (const seg of rep) appendSegment(seg)
         } else if (rep && typeof rep === 'object') {
           // chaite 主流程的回复约定是 event.reply({ text, reply })，必须处理对象形态
+          if (rep.reply === true) quote = true
           if (typeof rep.text === 'string' && rep.text) {
             replyText += (replyText ? '\n' : '') + rep.text
           } else if (rep.type) {
@@ -154,7 +156,7 @@ export class ChaiteClient {
         }
       }
 
-      return { text: replyText, images, replyMsgId: e.message_id }
+      return { text: replyText, images, quote, replyMsgId: e.message_id }
     }
 
     // 2. HTTP 远程桥接模式
@@ -190,6 +192,7 @@ export class ChaiteClient {
     return {
       text: result.text || result.content || '',
       images: result.images || [],
+      quote: Array.isArray(result.rawReplies) && result.rawReplies.some((r) => r && typeof r === 'object' && r.reply === true),
       replyMsgId: result.replyMsgId || e.message_id,
     }
   }
