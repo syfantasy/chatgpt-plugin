@@ -29,8 +29,12 @@ export class ChatGPTCommands extends plugin {
     const e = this.e
     if (!e.msg || !e.msg.trim()) return false
 
-    const cmdHit = await chaiteClient.matchCommand(e.msg).catch(() => null)
+    const cmdHit = await chaiteClient.matchCommand(e.msg).catch((err) => {
+      logger.error('[ChatGPT-Chaite指令] matchCommand 异常:', err?.message || err)
+      return null
+    })
     if (!cmdHit) return false
+    logger.mark(`[ChatGPT-Chaite指令] 命中指令: ${e.msg.trim()}`)
 
     // 命中 Chaite 注册表指令：原样转发，由 Chaite 的 handleMessage 执行并回复
     try {
