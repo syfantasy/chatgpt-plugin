@@ -40,15 +40,6 @@ export class ChatGPTChat extends plugin {
     const e = this.e
     const cfg = ChatGPTConfig
 
-    // 0. Chaite 指令：注册表由 Chaite 下发（单一来源），命中即原样转发，
-    //    由 Chaite 的 handleMessage 分发执行并回复，插件侧不做任何指令实现
-    if (e.msg && e.msg.trim()) {
-      const cmdHit = await chaiteClient.matchCommand(e.msg).catch(() => null)
-      if (cmdHit) {
-        return this.doChat(e, e.msg.trim())
-      }
-    }
-
     // 1. 判断是否命中对话触发条件
     const trigger = this.checkTrigger(e, cfg)
     if (!trigger.matched) {
